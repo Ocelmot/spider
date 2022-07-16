@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+	"spider",
+    "spider_client",
+    "spider_link",
+]

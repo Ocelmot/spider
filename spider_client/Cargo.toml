@@ -1,0 +1,16 @@
+[package]
+name = "spider_client"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dht_chord = { git = "https://github.com/Ocelmot/chord_dht" }
+
+tokio = { version = "1", features = ["full"] }
+
+serde_json = "1.0.73"
+serde = { version = "1.0.132", features = ["derive"] }
+
+tracing = "0.1"
