@@ -1,13 +1,21 @@
 
 
 
-
+pub use spider_link::{
+	message,
+	SpiderId2048,
+	SelfRelation,
+	Role,
+	Relation,
+};
 
 mod client;
-pub use client::{SpiderClient, Message};
+pub use client::SpiderClient;
 
-mod config;
-pub use config::SpiderClientConfig;
+mod state;
+use state::SpiderClientState;
+
+pub use state::AddressStrategy;
 
 
 

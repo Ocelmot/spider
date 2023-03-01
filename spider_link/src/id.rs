@@ -2,14 +2,14 @@
 use std::fmt;
 
 use dht_chord::ChordId;
-use rsa::{RsaPublicKey, pkcs8::{DecodePublicKey, spki}};
+use rsa::{RsaPublicKey, pkcs8::{DecodePublicKey, spki, EncodePublicKey}};
 use serde::{Serialize, Serializer, Deserialize, Deserializer, de::{Visitor, Error}};
 
 use num_bigint::BigUint;
 
 
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone, Eq, Hash)]
 pub struct SpiderId<const BYTE_SIZE: usize>{
 	bytes: [u8; BYTE_SIZE],
 }
@@ -130,3 +130,17 @@ impl<const BYTE_SIZE: usize> ChordId for SpiderId<BYTE_SIZE>{
         Self::from_bytes(bytes)
     }
 }
+
+
+
+
+// Generate id from RSA key
+impl SpiderId<294>{
+    pub fn from_key(key: RsaPublicKey) -> Self {
+        let pub_bytes = key.to_public_key_der().unwrap();
+		SpiderId::from_bytes(pub_bytes.as_ref().try_into().unwrap())
+    }
+}
+
+
+

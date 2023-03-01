@@ -1,5 +1,5 @@
 
-use std::io::ErrorKind;
+use std::{io::ErrorKind, future::Future};
 
 use chacha20poly1305::{Key, Nonce, ChaCha20Poly1305, KeyInit, aead::{OsRng, Aead}};
 use rand::RngCore;
@@ -21,14 +21,14 @@ use tokio::{
 };
 use tracing::{error, info};
 
-use crate::{message::{Message, Protocol, Frame}, SelfRelation, Relation};
-
+use crate::{message::{Frame, Message, Protocol}, SelfRelation, Relation};
+#[derive(Debug)]
 pub struct Link{
 	own_relation: SelfRelation,
 	other_relation: Relation,
 
 	out_tx: Sender<Message>,
-	in_rx: Receiver<Message>,
+	in_rx: Option<Receiver<Message>>,
 }
 
 impl Link{
@@ -107,7 +107,14 @@ impl Link{
 	}
 
 	pub async fn recv(&mut self) -> Option<Message>{
-		self.in_rx.recv().await
+		match &mut self.in_rx{
+			Some(in_rx) => in_rx.recv().await,
+			None => None,
+		}	
+	}
+
+	pub fn take_recv(&mut self) -> Option<Receiver<Message>>{
+		self.in_rx.take()
 	}
 
 }
@@ -385,7 +392,7 @@ impl LinkBuilder{
 			own_relation,
 			other_relation,
 			out_tx,
-			in_rx,
+			in_rx: Some(in_rx),
 		}
 	}
 }
