@@ -13,6 +13,8 @@ pub use crate::message::ui::{
 	UiElement,
 	UiElementKind,
 	UiElementUpdate,
+
+	UiInput,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

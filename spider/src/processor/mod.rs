@@ -29,6 +29,8 @@ use ui::{UiProcessor, UiProcessorMessage};
 mod peripherals;
 use peripherals::Peripherals;
 
+use self::ui::{SettingCategory, SettingType};
+
 pub struct ProcessorBuilder {
     config: Option<SpiderConfig>,
     state: Option<StateData>,
@@ -98,6 +100,8 @@ struct Processor {
     peripherals: Peripherals,
     ui: UiProcessor,
 
+    print_msg: bool,
+
     upkeep_interval_handle: JoinHandle<()>,
 }
 
@@ -122,33 +126,13 @@ impl Processor {
         // start datasets
 
         // start upkeep interval
-        let mut update_channel = sender.clone();
+        let update_channel = sender.clone();
         // let update_state = state.clone();
         let upkeep_interval_handle = tokio::spawn(async move {
-            // Testing ui
-            // let mut update_count = 0;
-            // let id = update_state.self_id().await;
-            // let rel = Relation{id: id.clone(), role: Role::Peripheral}; // Lie to the ui to get it to draw this ui page
-            // let mut root = UiElement::from_string(format!("Updates: {}", update_count));
-            // root.id = Some(String::from("root"));
-
-            // let mut page = UiPage::new(id.clone(), "Test Page");
-            // page.update_element(root);
-            // let msg = Message::Ui(UiMessage::SetPage(page));
-            // update_channel.send(ProcessorMessage::Message(rel.clone(), msg)).await;
-
             let mut interval = interval(Duration::from_secs(15));
             loop {
                 interval.tick().await;
                 update_channel.send(ProcessorMessage::Upkeep).await;
-
-                // testing ui
-                // update_count += 1;
-                // let mut root = UiElement::from_string(format!("Updates: {}", update_count));
-                // root.id = Some(String::from("root"));
-
-                // let msg = Message::Ui(UiMessage::UpdateElement(root));
-                // update_channel.send(ProcessorMessage::Message(rel.clone(), msg)).await;
             }
         });
 
@@ -162,6 +146,8 @@ impl Processor {
             router,
             peripherals,
             ui,
+
+            print_msg: true,
 
             upkeep_interval_handle,
         }
@@ -178,10 +164,23 @@ impl Processor {
                 tokio::fs::write(&*path, data).await;
             }
 
+            // setup setting to disable printing messages
+            let msg = UiProcessorMessage::SetSetting {
+                category: SettingCategory::Test,
+                name: String::from("Exit!"),
+                setting_type: SettingType::Button,
+                callback: |p, i|{
+                    std::process::exit(0);
+                },
+            };
+            self.ui.send(msg).await;
+
             loop {
                 let message = self.receiver.recv().await;
                 let message = if let Some(message) = message {
-                    println!("processing message: {:?}", message);
+                    if self.print_msg {
+                        println!("processing message: {:?}", message);
+                    }
                     message
                 } else {
                     println!("recieved no message, closing...");

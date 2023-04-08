@@ -4,16 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::SpiderId2048;
 
-use super::{UiElement, element::UiElementUpdate};
+use super::UiElement;
 
 mod path;
 pub use path::UiPath;
 
 mod page_list;
 pub use page_list::UiPageList;
-
-mod cursor;
-pub use cursor::UiPageCursor;
 
 mod manager;
 pub use manager::UiPageManager;
@@ -44,6 +41,9 @@ impl UiPage {
         &self.name
     }
 
+    pub fn id(&self) -> &SpiderId2048{
+        &self.id
+    }
     pub fn set_id(&mut self, id: SpiderId2048){
         self.id = id;
     }

@@ -25,12 +25,14 @@ impl UiPageManager {
     }
 
     pub fn from_page(page: UiPage) -> Self {
-        Self{
+        let mut ret = Self{
             page,
             ids: HashMap::new(),
             changed_nodes: BTreeSet::new(),
             change_set: UiElementChangeSet::new(),
-        }
+        };
+        ret.recalculate_ids();
+        ret
     }
 
     pub fn get_page(&self) -> &UiPage {
@@ -92,6 +94,10 @@ impl UiPageManager {
     }
 
     // get id
+    pub fn get_path(&self, id: &str) -> Option<&UiPath>{
+        self.ids.get(id)
+    }
+
     pub fn get_by_id(&self, id: &str) -> Option<&UiElement> {
         match self.ids.get(id){
             Some(path) => self.get_element(path),
@@ -170,6 +176,7 @@ impl UiPageManager {
             }
             
         }
+        self.recalculate_ids(); // Could change this to only update ids that have changed per the new updates
         return true;
     }
 }

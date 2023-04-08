@@ -99,6 +99,14 @@ impl UiPageList{
 		};
 		self.pages.get(id)
 	}
+
+	pub fn selected_page_mut(&mut self) -> Option<&mut UiPageManager>{
+		let id = match self.order.get(self.selected_page){
+			Some(id) => id,
+			None => return None,
+		};
+		self.pages.get_mut(id)
+	}
 	
 	pub fn select_prev_page(&mut self){
 		if self.order.len() <= 1{

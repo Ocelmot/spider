@@ -17,6 +17,9 @@ pub use element::{
     UiElementUpdate,
 };
 
+mod input;
+pub use input::UiInput;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UiMessage {
     // Base <---> UI Peripheral
@@ -26,9 +29,11 @@ pub enum UiMessage {
     GetPage(SpiderId2048),
     Page(UiPage),
     UpdateElementsFor(SpiderId2048, Vec<UiElementUpdate>),
+    InputFor(SpiderId2048, String, UiInput),
 
     //Peripheral page <---> Base
     SetPage(UiPage),
     ClearPage,
     UpdateElements(Vec<UiElementUpdate>),
+    Input(String, UiInput),
 }

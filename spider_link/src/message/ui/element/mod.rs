@@ -13,6 +13,7 @@ pub use reference::UiElementRef;
 pub struct UiElement {
     kind: UiElementKind,
     id: Option<String>,
+    selectable: bool,
 
     text: String,
     alt_text: String,
@@ -38,11 +39,26 @@ pub enum UiElementKind {
     Button,
 }
 
+impl UiElementKind{
+    pub fn selectable(&self) -> bool {
+        match self{
+            UiElementKind::Columns => false,
+            UiElementKind::Rows => false,
+            UiElementKind::Grid(_, _) => false,
+            UiElementKind::Text => false,
+            UiElementKind::TextEntry => true,
+            UiElementKind::Button => true,
+        }
+    }
+}
+
 impl UiElement {
     pub fn new(kind: UiElementKind) -> Self {
         Self {
             kind,
             id: None,
+            selectable: kind.selectable(),
+
             text: String::new(),
             alt_text: String::new(),
 
@@ -59,7 +75,8 @@ impl UiElement {
         Self {
             kind: UiElementKind::Text,
             id: None,
-            
+            selectable: false,
+
             text: string.into(),
             alt_text: String::new(),
 
@@ -77,8 +94,8 @@ impl UiElement {
         self.kind = kind;
     }
 
-    pub fn id(&self) -> &Option<String>{
-        &self.id
+    pub fn id(&self) -> Option<&String>{
+        self.id.as_ref()
     }
     pub fn set_id<S>(&mut self, id: S) 
     where
@@ -86,7 +103,12 @@ impl UiElement {
     {
         self.id = Some(id.into());
     }
-    
+    pub fn selectable(&self)->bool{
+        self.selectable
+    }
+    pub fn set_selectable(&mut self, selectable: bool){
+        self.selectable = selectable;
+    }
 
     pub fn text(&self) -> &str {
         &self.text
