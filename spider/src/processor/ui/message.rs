@@ -1,12 +1,13 @@
 use spider_link::{
-    message::{UiInput, UiMessage},
+    message::{AbsoluteDatasetPath, DatasetData, UiInput, UiMessage},
     Relation,
 };
 
-use crate::processor::sender::ProcessorSender;
+use crate::processor::{dataset, sender::ProcessorSender};
 
 pub enum UiProcessorMessage {
     RemoteMessage(Relation, UiMessage),
+    DatasetUpdate(AbsoluteDatasetPath, Vec<DatasetData>),
     SetSetting {
         category: SettingCategory,
         name: String,
@@ -23,6 +24,11 @@ impl std::fmt::Debug for UiProcessorMessage {
                 .debug_tuple("RemoteMessage")
                 .field(arg0)
                 .field(arg1)
+                .finish(),
+            Self::DatasetUpdate(path, dataset) => f
+                .debug_struct("DatasetUpdate")
+                .field("path", path)
+                .field("dataset", dataset)
                 .finish(),
             Self::SetSetting {
                 category,

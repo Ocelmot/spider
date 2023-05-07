@@ -2,3 +2,4 @@
 *.log
 *.json
 *.dat
+/spider/datasets

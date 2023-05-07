@@ -1,6 +1,7 @@
 
 use std::fmt;
 
+use base64::{engine::general_purpose, Engine};
 use dht_chord::ChordId;
 use rsa::{RsaPublicKey, pkcs8::{DecodePublicKey, spki, EncodePublicKey}};
 use serde::{Serialize, Serializer, Deserialize, Deserializer, de::{Visitor, Error}};
@@ -28,6 +29,14 @@ impl<const BYTE_SIZE: usize> SpiderId<BYTE_SIZE>{
 	pub fn as_pub_key(&self) -> Result<RsaPublicKey, spki::Error>{
         RsaPublicKey::from_public_key_der(&self.bytes)
 	}
+
+    pub fn to_base64(&self) -> String{
+        general_purpose::URL_SAFE_NO_PAD.encode(self.bytes)
+    }
+
+    pub fn sha256(&self) -> String{
+        sha256::digest(&self.bytes)
+    }
 }
 
 

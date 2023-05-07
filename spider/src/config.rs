@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fs, path::{Path, PathBuf}};
 
 use serde::{Serialize, Deserialize};
 
@@ -27,7 +27,8 @@ pub struct SpiderConfig{
     // UIConfig
 
     // Dataset configuration
-    // DatasetConfig
+    #[serde(default)]
+    dataset_path: Option<String>,
 }
 
 
@@ -40,6 +41,11 @@ impl SpiderConfig {
         // let data = fs::read_to_string(&path).expect(&format!("Failed to read config file: {:?}", path));
 		let config = serde_json::from_str(&data).expect("Failed to deserialize config");
         config
+    }
+
+    pub fn dataset_path(&self)-> PathBuf{
+        let s = self.dataset_path.clone().unwrap_or(String::from("datasets"));
+        PathBuf::from(s)
     }
 }
 

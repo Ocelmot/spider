@@ -89,6 +89,11 @@ impl UiProcessorState {
                     UiProcessorMessage::RemoteMessage(rel, msg) => {
                         self.process_remote_message(rel, msg).await
                     }
+                    UiProcessorMessage::DatasetUpdate(path, dataset) => {
+                        // forward dataset updates to clients
+                        let msg = UiMessage::Dataset(path, dataset);
+                        self.ui_to_subscribers(msg).await;
+                    }
                     UiProcessorMessage::SetSetting {
                         category,
                         name,
@@ -127,6 +132,7 @@ impl UiProcessorState {
             },
             UiMessage::Page(_) => {} // ignore, (base sends this, doesnt process it)
             UiMessage::UpdateElementsFor(_, _) => {} // ignore, (base sends this, doesnt process it)
+            UiMessage::Dataset(_, _) => {} // ignore, (base sends this, doesnt process it)
             UiMessage::InputFor(peripheral_id, element_id, input) => {
                 // if this is for the settings page, put it there
                 if self.state.self_id().await == peripheral_id {

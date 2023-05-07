@@ -29,6 +29,10 @@ use ui::{UiProcessor, UiProcessorMessage};
 mod peripherals;
 use peripherals::Peripherals;
 
+mod dataset;
+use dataset::DatasetProcessor;
+
+use self::dataset::DatasetProcessorMessage;
 use self::ui::{SettingCategory, SettingType};
 
 pub struct ProcessorBuilder {
@@ -99,6 +103,7 @@ struct Processor {
     router: RouterProcessor,
     peripherals: Peripherals,
     ui: UiProcessor,
+    dataset_processor: DatasetProcessor,
 
     print_msg: bool,
 
@@ -124,6 +129,7 @@ impl Processor {
         let ui = UiProcessor::new(config.clone(), state.clone(), sender.clone());
 
         // start datasets
+        let dataset_processor = DatasetProcessor::new(config.clone(), state.clone(), sender.clone());
 
         // start upkeep interval
         let update_channel = sender.clone();
@@ -146,6 +152,7 @@ impl Processor {
             router,
             peripherals,
             ui,
+            dataset_processor,
 
             print_msg: true,
 
@@ -198,9 +205,13 @@ impl Processor {
                             Message::Ui(ui) => {
                                 self.ui
                                     .send(UiProcessorMessage::RemoteMessage(relation, ui))
-                                    .await;
+                                    .await.unwrap();
                             }
-                            Message::Dataset => todo!(),
+                            Message::Dataset(msg) => {
+                                self.dataset_processor
+                                    .send(DatasetProcessorMessage::PublicMessage(relation, msg))
+                                    .await;
+                            },
                             Message::Peripheral(peripheral) => {
                                 // self.handle_peripheral(relation, peripheral);
                             }
