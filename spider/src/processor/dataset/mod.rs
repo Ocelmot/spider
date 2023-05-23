@@ -12,7 +12,7 @@ mod message;
 pub use message::DatasetProcessorMessage;
 
 use spider_link::{
-    message::{AbsoluteDatasetPath, AbsoluteDatasetScope, DatasetData, DatasetMessage, Message},
+    message::{AbsoluteDatasetPath, AbsoluteDatasetScope, DatasetData, DatasetMessage, Message, UiMessage},
     Relation, SpiderId2048,
 };
 use tokio::{
@@ -111,6 +111,27 @@ impl DatasetProcessorState {
                                 .send_ui(UiProcessorMessage::DatasetUpdate(k, dataset))
                                 .await;
                         }
+                    }
+                    DatasetProcessorMessage::UiUnsubscribe(k) => {
+                        match self.subscriptions.get_mut(&k){
+                            Some(h_set) => {
+                                h_set.remove(&DatasetSubscriber::Ui);
+                                // if the set is empty, remove it from the map
+                                if h_set.is_empty(){
+                                    self.subscriptions.remove(&k);
+                                }
+                            },
+                            None => {
+                                // if no set, there was no subscription after all!
+                            },
+                        }
+                    }
+                    DatasetProcessorMessage::ToUi(relation, path) => {
+                        // send dataset on behalf of the ui processor as a ui update
+                        let file_path = self.get_file_path(&path);
+                        let dataset = parse_dataset(&file_path).await;
+                        let msg = Message::Ui(UiMessage::Dataset(path, dataset));
+                        self.sender.send_message(relation, msg).await;
                     }
                     DatasetProcessorMessage::Upkeep => {}
                 }
@@ -309,4 +330,5 @@ async fn write_dataset(path: &Path, data: Vec<DatasetData>) {
     let data = serde_json::to_string(&data).unwrap();
 
     file.write_all(data.as_bytes()).await;
+    file.set_len(data.len().try_into().unwrap()).await;
 }

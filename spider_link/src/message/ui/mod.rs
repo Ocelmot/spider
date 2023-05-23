@@ -15,6 +15,13 @@ pub use element::{
 	UiElement,
 	UiElementKind,
     UiElementUpdate,
+    UiElementChange,
+    UiElementContent,
+    UiElementContentPart,
+    
+    UiChildOperations,
+
+    UpdateSummary,
 };
 
 mod input;
@@ -26,17 +33,16 @@ use super::{AbsoluteDatasetPath, DatasetData};
 pub enum UiMessage {
     // Base <---> UI Peripheral
     Subscribe,
-    GetPages,
     Pages(Vec<UiPage>),
     GetPage(SpiderId2048),
     Page(UiPage),
     UpdateElementsFor(SpiderId2048, Vec<UiElementUpdate>),
     Dataset(AbsoluteDatasetPath, Vec<DatasetData>),
-    InputFor(SpiderId2048, String, UiInput),
+    InputFor(SpiderId2048, String, Vec<usize>, UiInput),
 
     //Peripheral page <---> Base
     SetPage(UiPage),
     ClearPage,
     UpdateElements(Vec<UiElementUpdate>),
-    Input(String, UiInput),
+    Input(String, Vec<usize>, UiInput),
 }

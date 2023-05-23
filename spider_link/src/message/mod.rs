@@ -13,6 +13,11 @@ pub use crate::message::ui::{
 	UiElement,
 	UiElementKind,
 	UiElementUpdate,
+    UiElementChange,
+    UiElementContent,
+    UiElementContentPart,
+    UiChildOperations,
+    UpdateSummary,
 
 	UiInput,
 };

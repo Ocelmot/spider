@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::format};
 
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +22,14 @@ pub struct AbsoluteDatasetPath{
 }
 
 impl AbsoluteDatasetPath{
+
+    pub fn new_public(name: Vec<String>) -> Self{
+        Self { 
+            scope: AbsoluteDatasetScope::Public,
+            name
+        }
+    }
+
     pub fn scope(&self) -> &AbsoluteDatasetScope{
         &self.scope
     }
@@ -121,5 +129,44 @@ pub enum DatasetMessage{
 }
 
 impl DatasetData{
+    pub fn get_property(&self, property: &String) -> &Self{
+        match self{
+            DatasetData::Null => &DatasetData::Null,
+            DatasetData::Byte(_) => &DatasetData::Null,
+            DatasetData::Int(_) => &DatasetData::Null,
+            DatasetData::Float(_) => &DatasetData::Null,
+            DatasetData::String(_) => &DatasetData::Null,
+            DatasetData::Array(arr) => {
+                match property.parse::<usize>(){
+                    Ok(index) => {
+                        match arr.get(index){
+                            Some(elem) => elem,
+                            None => &DatasetData::Null,
+                        }
+                    },
+                    Err(_) => {
+                        &DatasetData::Null
+                    },
+                }
+            },
+            DatasetData::Map(map) => {
+                match map.get(property) {
+                    Some(elem) => elem,
+                    None => &DatasetData::Null,
+                }
+            },
+        }
+    }
 
+    pub fn to_string(&self) -> String{
+        match self{
+            DatasetData::Null => "<null>".to_owned(),
+            DatasetData::Byte(b) => b.to_string(),
+            DatasetData::Int(i) => i.to_string(),
+            DatasetData::Float(f) => f.to_string(),
+            DatasetData::String(s) => s.to_string(),
+            DatasetData::Array(a) => format!("{:?}", a),
+            DatasetData::Map(m) => format!("{:?}", m),
+        }
+    }
 }

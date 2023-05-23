@@ -1,13 +1,30 @@
+use std::{collections::HashMap, iter::FusedIterator};
+
 use serde::{Deserialize, Serialize};
 
+mod content;
+pub use content::{
+    UiElementContent,
+    UiElementContentPart,
+};
+
 mod change;
-pub use change::UiElementChangeSet;
+pub use change::{
+    UiElementChange,
+    UiChildOperations,
+    UiElementChangeSet
+};
 
 mod update;
 pub use update::UiElementUpdate;
 
+mod update_summary;
+pub use update_summary::UpdateSummary;
+
 mod reference;
 pub use reference::UiElementRef;
+
+use crate::message::{AbsoluteDatasetPath, DatasetData};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiElement {
@@ -15,8 +32,10 @@ pub struct UiElement {
     id: Option<String>,
     selectable: bool,
 
-    text: String,
-    alt_text: String,
+    content: UiElementContent,
+    alt_text: UiElementContent,
+
+    dataset: Option<AbsoluteDatasetPath>,
 
     children: Option<Vec<UiElement>>,
 
@@ -24,7 +43,7 @@ pub struct UiElement {
     changes: UiElementChangeSet,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiElementKind {
     // Layout
     Columns,
@@ -59,8 +78,10 @@ impl UiElement {
             id: None,
             selectable: kind.selectable(),
 
-            text: String::new(),
-            alt_text: String::new(),
+            content: UiElementContent::new(),
+            alt_text: UiElementContent::new(),
+
+            dataset: None,
 
             children: Some(Vec::new()),
 
@@ -77,8 +98,10 @@ impl UiElement {
             id: None,
             selectable: false,
 
-            text: string.into(),
-            alt_text: String::new(),
+            content: UiElementContent::new_text(string.into()),
+            alt_text: UiElementContent::new(),
+
+            dataset: None,
 
             children: Some(Vec::new()),
 
@@ -110,17 +133,41 @@ impl UiElement {
         self.selectable = selectable;
     }
 
-    pub fn text(&self) -> &str {
-        &self.text
+    pub fn text(&self) -> String {
+        self.content.to_string()
     }
     pub fn set_text<S>(&mut self, text: S)
     where
     S: Into<String>,
     {
-        self.text = text.into();
+        self.content = UiElementContent::new_text(text.into());
     }
 
+    pub fn set_content(&mut self, content: UiElementContent){
+        self.content = content;
+    }
 
+    pub fn dataset(&self) -> &Option<AbsoluteDatasetPath>{
+        &self.dataset
+    }
+    pub fn set_dataset(&mut self, dataset: Option<AbsoluteDatasetPath>){
+        self.dataset = dataset;
+    }
+
+    // Content operations
+    pub fn render_content(&self, data: &DatasetData) -> String {
+        self.content.resolve(data)
+    }
+    pub fn render_content_opt(&self, data: &Option<&DatasetData>) -> String {
+        match data {
+            Some(data) => {
+                self.content.resolve(data)
+            },
+            None => {
+                self.text()
+            },
+        }
+    }
 
     // Child operations
     pub fn get_child<'a>(&'a self, index: usize) -> Option<&'a UiElement> {
@@ -156,6 +203,10 @@ impl UiElement {
         }
     }
 
+    pub fn children_dataset<'a>(&'a self, data: &'a Option<&DatasetData>, data_map: &'a HashMap<AbsoluteDatasetPath, Vec<DatasetData>>) -> UiElementDatasetIterator{
+        UiElementDatasetIterator::new(&self, data, data_map)
+    }
+
     pub fn insert_child(&mut self, index: usize, child: UiElement){
         match &mut self.children {
             Some(children) => {
@@ -181,14 +232,15 @@ impl UiElement {
         std::mem::take(&mut self.changes)
     }
 
-    pub fn apply_update(&mut self, mut update: UiElementUpdate){
+    pub fn apply_update(&mut self, mut update: UiElementUpdate, summary: &mut UpdateSummary){
         // if node was changed, assign values to self
         if let Some(node_changes) = update.take_element(){
+            summary.element(self, &node_changes);
             // assign from change to self
             self.kind = node_changes.kind;
             self.id = node_changes.id;
         
-            self.text = node_changes.text;
+            self.content = node_changes.content;
             self.alt_text = node_changes.alt_text;
         }
 
@@ -199,13 +251,16 @@ impl UiElement {
                 for operation in child_changes{
                     match operation{
                         change::UiChildOperations::Insert(index, element) => {
+                            summary.add(&element);
                             children.insert(index, element);
                         },
                         change::UiChildOperations::Delete(index) => {
-                            children.remove(index);
+                            let removed = children.remove(index);
+                            summary.remove(&removed);
                         },
                         change::UiChildOperations::MoveTo { from, to } => {
                             let element = children.remove(from);
+                            summary.move_to(&element);
                             children.insert(to, element);
                         },
                     }
@@ -214,3 +269,253 @@ impl UiElement {
         }
     }
 }
+
+
+
+
+
+
+
+pub struct UiElementDatasetIterator<'a>{
+    // data references
+    elem: &'a UiElement,
+    data: &'a Option<&'a DatasetData>,
+    dataset_map: &'a HashMap<AbsoluteDatasetPath, Vec<DatasetData>>,
+    // front iterator: points to next items to return
+    front_dataset: isize,
+    front_child: isize,
+    // back iterator
+    back_dataset: isize,
+    back_child: isize,
+}
+
+impl<'a> UiElementDatasetIterator<'a>{
+    fn new(elem: &'a UiElement, data: &'a Option<&'a DatasetData>, dataset_map: &'a HashMap<AbsoluteDatasetPath, Vec<DatasetData>>) -> Self{
+        let back_dataset = match &elem.dataset{
+            Some(dataset) => {
+                match dataset_map.get(&dataset){
+                    Some(dataset) => (dataset.len() as isize) - 1,
+                    None => 0,
+                }
+            },
+            None => 0,
+        };
+        let back_child = match &elem.children{
+            Some(children) => (children.len() as isize) - 1,
+            None => 0,
+        };
+        Self{
+            // data references
+            elem,
+            data,
+            dataset_map,
+            // front iterator
+            front_dataset: 0, // index of next element to return
+            front_child: 0,
+            // back iterator
+            back_dataset,
+            back_child,
+        }
+    }
+
+    fn is_done(&self) -> bool{
+        if self.back_dataset < self.front_dataset{
+            return true;
+        }
+        if self.back_dataset == self.front_dataset{
+            if self.back_child < self.front_child{
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn advance_front(&mut self){
+        self.front_child += 1;
+        let child_len = self.elem.children.as_ref().map_or(0, |v|v.len() as isize);
+        if self.front_child >= child_len {
+            self.front_child = 0;
+            self.front_dataset += 1;
+        }
+    }
+    fn advance_back(&mut self){
+        self.back_child -= 1;
+        if self.back_child < 0 {
+            let child_len = self.elem.children.as_ref().map_or(0, |v|v.len() as isize);
+            self.back_child = child_len - 1;
+            self.back_dataset -= 1;
+        }
+    }
+}
+
+impl<'a> Iterator for UiElementDatasetIterator<'a>{
+    type Item = (Option<usize>, &'a UiElement, Option<&'a DatasetData>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &self.elem.children{
+            Some(children) => {
+                // if the elem has a dataset, iterate that
+                
+                match &self.elem.dataset{
+                    Some(path) => {
+                        match self.dataset_map.get(path) {
+                            Some(dataset) => {
+                                if self.is_done(){
+                                    return None;
+                                }
+
+                                // get data
+                                let index = self.front_dataset as usize;
+                                let child = &children[self.front_child as usize];
+                                let datum = &dataset[self.front_dataset as usize];
+                                
+                                // update indices
+                                self.advance_front();
+
+                                // return triplet
+                                Some((Some(index), child, Some(datum)))
+                            },
+                            None => {
+                                // there was no dataset.
+                                // iterate through children once, and pass no data element
+                                if self.is_done(){
+                                    return None;
+                                }
+
+                                // get data
+                                let index = self.front_dataset as usize;
+                                let child = &children[self.front_child as usize];
+                                let datum = &None;
+                                
+                                // update indices
+                                self.advance_front();
+
+                                // return triplet
+                                Some((Some(index), child, datum.as_ref()))
+                            },
+                        }
+                    },
+                    None => {
+                        // else, iterate normally
+                        // test validity of indices
+                        if self.is_done(){
+                            return None;
+                        }
+
+                        // get data
+                        let child = &children[self.front_child as usize];
+                        let datum = self.data;
+                        
+                        // update indices
+                        self.advance_front();
+
+                        // return triplet
+                        Some((None, child, *datum))
+                    },
+                }
+            },
+            None => None, // No children cause no elements
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.elem.dataset{
+            Some(path) => {
+                // there is a dataset path, add uniterated dataset sizes to total
+                match self.dataset_map.get(&path) {
+                    Some(_) => {
+                        let l = (self.back_child - self.front_child + 1) as usize;
+                        let d = self.back_dataset - self.front_dataset;
+                        let t = l + (d as usize * self.elem.children().len());
+                        (t, Some(t))
+                    },
+                    None => {
+                        // there is no dataset, length is back - front
+                        // +1 for len vs index discrepancy
+                        let l = (self.back_child - self.front_child + 1) as usize;
+                        (l, Some(l))        
+                    },
+                }
+            },
+            None => {
+                // there is no dataset, length is back - front
+                // +1 for len vs index discrepancy
+                let l = (self.back_child - self.front_child + 1) as usize;
+                (l, Some(l))
+            },
+        }
+    }
+}
+
+impl<'a> DoubleEndedIterator for UiElementDatasetIterator<'a>{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match &self.elem.children{
+            Some(children) => {
+                // if the elem has a dataset, iterate that
+                
+                match &self.elem.dataset{
+                    Some(path) => {
+                        match self.dataset_map.get(path) {
+                            Some(dataset) => {
+                                if self.is_done(){
+                                    return None;
+                                }
+
+                                // get data
+                                let index = self.back_dataset as usize;
+                                let child = &children[self.back_child as usize];
+                                let datum = &dataset[self.back_dataset as usize];
+                                
+                                // update indices
+                                self.advance_back();
+
+                                // return triplet
+                                Some((Some(index), child, Some(datum)))
+                            },
+                            None => {
+                                // there was no dataset.
+                                // iterate through children once, and pass no data element
+                                if self.is_done(){
+                                    return None;
+                                }
+
+                                // get data
+                                let index = self.back_dataset as usize;
+                                let child = &children[self.back_child as usize];
+                                let datum = &None;
+                                
+                                // update indices
+                                self.advance_back();
+
+                                // return triplet
+                                Some((Some(index), child, datum.as_ref()))
+                            },
+                        }
+                    },
+                    None => {
+                        // else, iterate normally
+                        // test validity of indices
+                        if self.is_done(){
+                            return None;
+                        }
+
+                        // get data
+                        let child = &children[self.back_child as usize];
+                        let datum = self.data;
+                        
+                        // update indices
+                        self.advance_back();
+
+                        // return triplet
+                        Some((None, child, *datum))
+                    },
+                }
+            },
+            None => None, // No children cause no elements
+        }
+    }
+}
+
+impl<'a> ExactSizeIterator for UiElementDatasetIterator<'a>{}
+
+impl<'a> FusedIterator for UiElementDatasetIterator<'a>{}

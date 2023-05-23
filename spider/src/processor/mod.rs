@@ -196,10 +196,6 @@ impl Processor {
                 };
 
                 match message {
-                    ProcessorMessage::RouterMessage(msg) => {
-                        self.router.send(msg).await;
-                    }
-                    ProcessorMessage::UiMessage(ui_message) => {}
                     ProcessorMessage::RemoteMessage(relation, message) => {
                         match message {
                             Message::Ui(ui) => {
@@ -212,15 +208,22 @@ impl Processor {
                                     .send(DatasetProcessorMessage::PublicMessage(relation, msg))
                                     .await;
                             },
-                            Message::Peripheral(peripheral) => {
-                                // self.handle_peripheral(relation, peripheral);
-                            }
+                            Message::Peripheral(peripheral) => {}
                             Message::Event(event) => {
                                 self.router
                                     .send(router::RouterProcessorMessage::RouteEvent(event))
                                     .await;
                             }
                         }
+                    }
+                    ProcessorMessage::RouterMessage(msg) => {
+                        self.router.send(msg).await;
+                    }
+                    ProcessorMessage::UiMessage(msg) => {
+                        self.ui.send(msg).await;
+                    }
+                    ProcessorMessage::DatasetMessage(msg) => {
+                        self.dataset_processor.send(msg).await;
                     }
                     ProcessorMessage::Upkeep => {
                         self.state.save_file().await;

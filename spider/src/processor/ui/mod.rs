@@ -1,7 +1,7 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use spider_link::{
-    message::{Message, UiMessage, UiPageList, UiInput},
+    message::{Message, UiMessage, UiPageList, UiInput, AbsoluteDatasetPath, UiElementUpdate, UiPageManager, UiChildOperations, UpdateSummary, DatasetData},
     Relation, Role,
 };
 use tokio::{
@@ -11,7 +11,7 @@ use tokio::{
 
 use crate::{config::SpiderConfig, state_data::StateData};
 
-use super::sender::ProcessorSender;
+use super::{sender::ProcessorSender, dataset::DatasetProcessorMessage};
 
 mod settings;
 
@@ -54,6 +54,7 @@ struct UiProcessorState {
 
     pages: UiPageList,
     subscribers: BTreeSet<Relation>,
+    dataset_subscriptions: HashMap<AbsoluteDatasetPath, isize>,
     settings_callbacks: HashMap<String, fn(&mut ProcessorSender, UiInput)>,
 }
 
@@ -72,6 +73,8 @@ impl UiProcessorState {
 
             pages: UiPageList::new(),
             subscribers: BTreeSet::new(),
+
+            dataset_subscriptions: HashMap::new(),
             settings_callbacks: HashMap::new(),
         }
     }
@@ -115,12 +118,16 @@ impl UiProcessorState {
         }
         match msg {
             UiMessage::Subscribe => {
-                self.subscribers.insert(rel);
-            }
-            UiMessage::GetPages => {
+                self.subscribers.insert(rel.clone());
+                // send current page list
                 let pages = self.pages.clone_page_vec();
                 let msg = Message::Ui(UiMessage::Pages(pages));
-                self.sender.send_message(rel, msg).await;
+                self.sender.send_message(rel.clone(), msg).await;
+                // send current dataset list
+                for i in self.dataset_subscriptions.keys() {
+                    let msg = DatasetProcessorMessage::ToUi(rel.clone(), i.clone());
+                    self.sender.send_dataset(msg).await;
+                }
             }
             UiMessage::Pages(_) => {} // ignore, (base sends this, doesnt process it)
             UiMessage::GetPage(id) => match self.pages.get_page_mut(&id) {
@@ -133,13 +140,13 @@ impl UiProcessorState {
             UiMessage::Page(_) => {} // ignore, (base sends this, doesnt process it)
             UiMessage::UpdateElementsFor(_, _) => {} // ignore, (base sends this, doesnt process it)
             UiMessage::Dataset(_, _) => {} // ignore, (base sends this, doesnt process it)
-            UiMessage::InputFor(peripheral_id, element_id, input) => {
+            UiMessage::InputFor(peripheral_id, element_id, dataset_ids, input) => {
                 // if this is for the settings page, put it there
                 if self.state.self_id().await == peripheral_id {
                     self.settings_input(&element_id, input).await;
                 }else{
                     // recieve an input from the ui and route it to the peripheral
-                    let msg = Message::Ui(UiMessage::Input(element_id, input));
+                    let msg = Message::Ui(UiMessage::Input(element_id, dataset_ids, input));
                     let rel = Relation {
                         role: Role::Peripheral,
                         id: peripheral_id,
@@ -150,24 +157,37 @@ impl UiProcessorState {
 
             UiMessage::SetPage(mut page) => {
                 page.set_id(rel.id); // ensure that recieved page uses peripheral's id
-                self.pages.upsert_page(page.clone());
-                let subscribers: Vec<Relation> = self.subscribers.iter().cloned().collect();
+                let mut summary = UpdateSummary::new();
+                // add new page
+                summary.add(page.root());
+                match self.pages.upsert_page(page.clone()){
+                    Some(page) => {
+                        // if there was an old page, remove it
+                        summary.remove(page.root());
+                    },
+                    None => {},
+                }
 
-                let msg = Message::Ui(UiMessage::Page(page.clone()));
-                self.sender.multicast_message(subscribers, msg).await;
+                let msg = UiMessage::Page(page.clone());
+                self.ui_to_subscribers(msg).await;
+
+                // Handle the summary
+                self.update_dataset_summary(summary).await;
             }
             UiMessage::ClearPage => {}
             UiMessage::UpdateElements(updates) => {
                 // get this manager, apply the updates, forward to clients
                 match self.pages.get_page_mut(&rel.id) {
                     Some(mgr) => {
-                        mgr.apply_changes(updates.clone());
+                        let summary = mgr.apply_changes(updates.clone());
                         // send to clients here
                         let msg = UiMessage::UpdateElementsFor(
                             rel.id.clone(),
                             updates.clone(),
                         );
                         self.ui_to_subscribers(msg).await;
+                        // handle summary changes
+                        self.update_dataset_summary(summary);
                     }
                     None => {} // no page to update
                 }
@@ -186,5 +206,28 @@ impl UiProcessorState {
 
         let msg = Message::Ui(msg);
         self.sender.multicast_message(subscribers, msg).await;
+    }
+
+    async fn update_dataset_summary(&mut self, summary: UpdateSummary){
+        for (path, delta) in summary.dataset_subscriptions() {
+            match self.dataset_subscriptions.get_mut(path){
+                Some(count) => {
+                    *count += delta;
+                    if count <= &mut 0 {
+                        // unsubscribe + remove entry
+                        self.sender.send_dataset(DatasetProcessorMessage::UiUnsubscribe(path.clone())).await;
+                        self.dataset_subscriptions.remove(path);
+                    }
+                },
+                None => {
+                    // subscribe if positive delta (negative shouldnt happen)
+                    if delta > &0 {
+                        self.dataset_subscriptions.insert(path.clone(), *delta);
+                        // send subscription message
+                        self.sender.send_dataset(DatasetProcessorMessage::UiSubscribe(path.clone())).await;
+                    }
+                },
+            }
+        }
     }
 }

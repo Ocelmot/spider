@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::message::ui::page::UiPath;
+use crate::message::{ui::page::UiPath};
 
 use super::{change::UiChildOperations, UiElement};
 

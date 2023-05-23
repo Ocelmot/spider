@@ -39,20 +39,21 @@ impl UiPageList{
 
 	pub fn add_pages(&mut self, pages: Vec<UiPage>){
 		for page in pages{
-			self.upsert_page(page)
+			self.upsert_page(page);
 		}
 	}
 
-	pub fn upsert_page(&mut self, page: UiPage){
+	pub fn upsert_page(&mut self, page: UiPage) -> Option<UiPage>{
 		match self.pages.get_mut(&page.id) {
 			Some(p) => { // page exists, replace it
-				p.set_page(page)
+				Some(p.set_page(page))
 			},
 			None => { // new page, add at end
 				let key = page.id.clone();
 				let page_manager = UiPageManager::from_page(page);
 				self.pages.insert(key.clone(), page_manager);
 				self.order.push(key);
+				None
 			},
 		}
 	}

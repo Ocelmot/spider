@@ -1,6 +1,6 @@
 use std::{collections::{BTreeSet, HashMap}, mem};
 
-use crate::{SpiderId2048, message::{ui::element::{UiElementChangeSet, UiElementUpdate, UiElementRef}, UiElement}};
+use crate::{SpiderId2048, message::{ui::element::{UiElementChangeSet, UiElementUpdate, UiElementRef, UpdateSummary}, UiElement}};
 
 use super::{UiPage, UiPath};
 
@@ -39,10 +39,11 @@ impl UiPageManager {
         &self.page
     }
 
-    pub fn set_page(&mut self, page: UiPage){
-        self.page = page;
+    pub fn set_page(&mut self, mut page: UiPage) -> UiPage{
+        mem::swap(&mut self.page, &mut page);
         self.changed_nodes.clear();
         self.recalculate_ids();
+        page
     }
 
     fn recalculate_ids(&mut self){
@@ -159,7 +160,9 @@ impl UiPageManager {
         ret
     }
 
-    pub fn apply_changes(&mut self, changes: Vec<UiElementUpdate>) -> bool{
+    pub fn apply_changes(&mut self, changes: Vec<UiElementUpdate>) -> UpdateSummary{
+        let mut ret = UpdateSummary::new();
+        
         self.consolidate_changes();
         self.change_set.clear();
 
@@ -167,16 +170,16 @@ impl UiPageManager {
             let element = self.get_element_raw(change.path());
             match element {
                 Some(element) => {
-                    element.apply_update(change);
+                    element.apply_update(change, &mut ret);
                 },
                 None => {
                     // could not find element to update, need to resync
-                    return false;
+                    return ret;
                 },
             }
             
         }
         self.recalculate_ids(); // Could change this to only update ids that have changed per the new updates
-        return true;
+        return ret;
     }
 }

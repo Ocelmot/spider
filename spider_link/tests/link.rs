@@ -7,8 +7,10 @@
 
 
 
+use std::collections::HashMap;
+
 use rsa::RsaPrivateKey;
-use spider_link::{link::Link, SelfRelation, Role, message::Message};
+use spider_link::{link::Link, SelfRelation, Role, message::{Message, DatasetData, UiElement, UiElementKind, AbsoluteDatasetPath, DatasetPath}, id::SpiderId};
 
 
 
@@ -49,6 +51,70 @@ async fn send_message(){
 }
 
 
+#[test]
+fn test_ui_element_dataset_iterator(){
+    let mut data_map: HashMap<AbsoluteDatasetPath, Vec<DatasetData>> = HashMap::new();
+
+    let path = AbsoluteDatasetPath::new_public(vec!["test".into()]);
+    let mut dataset = vec![DatasetData::String("data 1".into()), DatasetData::String("data 2".into())];
+    dataset.push(DatasetData::String("data 3".into()));
+    data_map.insert(path.clone(), dataset);
+
+    let mut elem = UiElement::new(UiElementKind::Rows);
+    elem.append_child({
+        UiElement::from_string("Child 1")
+    });
+    // elem.append_child({
+    //     UiElement::from_string("Child 2")
+    // });
+    // elem.append_child({
+    //     UiElement::from_string("Child 3")
+    // });
+
+    elem.set_dataset(Some(path.clone()));
+
+    println!("===== plain iteration =====");
+    for (dataset_index, child, datum) in elem.children_dataset(&None, &data_map){
+        println!("idx: {:?}", dataset_index);
+        println!("child:{:?}", child.render_content_opt(&datum));
+        println!("datum: {:?}", datum);
+        println!();
+    }
+
+    println!("===== take 1 =====");
+    for (dataset_index, child, datum) in elem.children_dataset(&None, &data_map).take(1){
+        println!("idx: {:?}", dataset_index);
+        println!("child:{:?}", child.render_content_opt(&datum));
+        println!("datum: {:?}", datum);
+        println!();
+    }
+
+    println!("===== collect =====");
+    let mut iter = elem.children_dataset(&None, &data_map).take(1).rev();
+    println!("{:?}", iter.size_hint());
+    println!("{:?}", iter.len());
+    println!("{:?}", iter.next_back());
 
 
 
+    println!("===== manual =====");
+    let mut iter = elem.children_dataset(&None, &data_map);
+    println!("len: {:?}", iter.len());
+    println!("size_hint: {:?}", iter.size_hint());
+    println!("count {:?}", iter.count());
+    // println!("next: {:?}", iter.next());
+    // println!("next back: {:?}", iter.next_back());
+    // println!("next: {:?}", iter.next());
+    // println!("next: {:?}", iter.next());
+
+}
+
+#[test]
+fn test_iter(){
+    let v = vec![0, 1, 2, 3];
+    println!("size_hint: {:?}", v.iter().size_hint());
+
+    for val in v.iter().take(1).rev(){
+        println!("val: {:?}", val);
+    }
+}

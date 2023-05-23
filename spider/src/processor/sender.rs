@@ -1,7 +1,7 @@
 use spider_link::{message::{Message, EventMessage}, Relation};
 use tokio::sync::mpsc::{error::SendError, Sender};
 
-use super::{message::ProcessorMessage, router::RouterProcessorMessage, ui::UiProcessorMessage};
+use super::{message::ProcessorMessage, router::RouterProcessorMessage, ui::UiProcessorMessage, dataset::DatasetProcessorMessage};
 
 #[derive(Debug, Clone)]
 pub struct ProcessorSender {
@@ -55,6 +55,15 @@ impl ProcessorSender {
         msg: UiProcessorMessage,
     ) -> Result<(), SendError<ProcessorMessage>> {
         let msg = ProcessorMessage::UiMessage(msg);
+        self.sender.send(msg).await
+    }
+
+    // send dataset
+    pub(crate) async fn send_dataset(
+        &mut self,
+        msg: DatasetProcessorMessage,
+    ) -> Result<(), SendError<ProcessorMessage>> {
+        let msg = ProcessorMessage::DatasetMessage(msg);
         self.sender.send(msg).await
     }
 

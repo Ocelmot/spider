@@ -3,7 +3,7 @@ use spider_link::{
     Relation,
 };
 
-use crate::processor::{dataset, sender::ProcessorSender};
+use crate::processor::sender::ProcessorSender;
 
 pub enum UiProcessorMessage {
     RemoteMessage(Relation, UiMessage),
