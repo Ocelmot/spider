@@ -242,6 +242,16 @@ impl DatasetProcessorState {
                 write_dataset(&file_path, dataset.clone()).await;
                 self.message_subscribed(path, &dataset).await;
             }
+            DatasetMessage::Empty { path } => {
+                let path = path.resolve(rel.id);
+                let file_path = self.get_file_path(&path);
+                // create empty dataset
+                let dataset = vec![];
+                // write to file
+                write_dataset(&file_path, dataset.clone()).await;
+                self.message_subscribed(path, &dataset).await;
+
+            }
             DatasetMessage::Dataset { .. } => {} //base sends this, not recieve (Could use as an assignment operation)
         }
     }

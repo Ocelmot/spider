@@ -43,9 +43,12 @@ pub struct UiElement {
     changes: UiElementChangeSet,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiElementKind {
+    None,
+
     // Layout
+    Spacer,
     Columns,
     Rows,
     Grid(u8, u8),
@@ -56,27 +59,59 @@ pub enum UiElementKind {
     // Input
     TextEntry,
     Button,
+
+    // Misc
+    Variable(UiElementContentPart),
 }
 
 impl UiElementKind{
     pub fn selectable(&self) -> bool {
         match self{
+            UiElementKind::None => false,
+            UiElementKind::Spacer => false,
             UiElementKind::Columns => false,
             UiElementKind::Rows => false,
             UiElementKind::Grid(_, _) => false,
             UiElementKind::Text => false,
             UiElementKind::TextEntry => true,
             UiElementKind::Button => true,
+            UiElementKind::Variable(_) =>false ,
+        }
+    }
+
+    pub fn resolve(self, datum: &Option<&DatasetData>) -> UiElementKind{
+        match datum{
+            Some(datum) => {
+                if let UiElementKind::Variable(content_part) = self.clone() {
+                    let mut string = content_part.resolve(datum);
+                    string = string.to_ascii_lowercase();
+                    match string.as_str(){
+                        "none" => UiElementKind::None,
+                        "spacer" => UiElementKind::Spacer,
+                        "columns" => UiElementKind::Columns,
+                        "rows" => UiElementKind::Rows,
+
+                        "text" => UiElementKind::Text,
+                        "textentry" => UiElementKind::TextEntry,
+                        "button" => UiElementKind::Button,
+                        _ => self
+                    }
+                }else{
+                    self
+                }
+            },
+            None => self,
         }
     }
 }
 
 impl UiElement {
     pub fn new(kind: UiElementKind) -> Self {
+        let selectable = kind.selectable();
         Self {
             kind,
             id: None,
-            selectable: kind.selectable(),
+            selectable,
 
             content: UiElementContent::new(),
             alt_text: UiElementContent::new(),
@@ -110,8 +145,8 @@ impl UiElement {
     }
 
     // Accessors, etc.
-    pub fn kind(&self) -> UiElementKind{
-        self.kind
+    pub fn kind(&self) -> &UiElementKind{
+        &self.kind
     }
     pub fn set_kind(&mut self, kind: UiElementKind){
         self.kind = kind;

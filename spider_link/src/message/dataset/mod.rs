@@ -124,6 +124,7 @@ pub enum DatasetMessage{
     SetElements{path: DatasetPath, data: Vec<DatasetData>, id: usize},
 
     DeleteElement{path: DatasetPath, id: usize},
+    Empty{path: DatasetPath},
     // Dataset Response
     Dataset{path: DatasetPath, data: Vec<DatasetData>},
 }

@@ -9,10 +9,10 @@ pub enum UiProcessorMessage {
     RemoteMessage(Relation, UiMessage),
     DatasetUpdate(AbsoluteDatasetPath, Vec<DatasetData>),
     SetSetting {
-        category: SettingCategory,
-        name: String,
-        setting_type: SettingType,
-        callback: fn(&mut ProcessorSender, UiInput),
+        header: String,
+        title: String,
+        inputs: Vec<(String, String)>,
+        cb: fn(&mut ProcessorSender, u32, UiInput)
     },
     Upkeep,
 }
@@ -31,29 +31,18 @@ impl std::fmt::Debug for UiProcessorMessage {
                 .field("dataset", dataset)
                 .finish(),
             Self::SetSetting {
-                category,
-                name,
-                setting_type,
-                callback,
+                header,
+                title,
+                inputs,
+                cb,
             } => f
                 .debug_struct("SetSetting")
-                .field("category", category)
-                .field("name", name)
-                .field("setting_type", setting_type)
-                .field("callback", &"<redacted impl>")
+                .field("header", header)
+                .field("title", title)
+                .field("inputs", inputs)
+                .field("cb", &"<redacted impl>")
                 .finish(),
             Self::Upkeep => write!(f, "Upkeep"),
         }
     }
-}
-
-#[derive(Debug)]
-pub enum SettingCategory {
-    Test,
-}
-
-#[derive(Debug)]
-pub enum SettingType {
-    Button,
-    Text,
 }

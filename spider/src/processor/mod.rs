@@ -33,7 +33,7 @@ mod dataset;
 use dataset::DatasetProcessor;
 
 use self::dataset::DatasetProcessorMessage;
-use self::ui::{SettingCategory, SettingType};
+
 
 pub struct ProcessorBuilder {
     config: Option<SpiderConfig>,
@@ -173,10 +173,10 @@ impl Processor {
 
             // setup setting to disable printing messages
             let msg = UiProcessorMessage::SetSetting {
-                category: SettingCategory::Test,
-                name: String::from("Exit!"),
-                setting_type: SettingType::Button,
-                callback: |p, i|{
+                header: String::from("System"),
+                title: String::from("Exit!"),
+                inputs: vec![("button".to_string(), "Exit".to_string())],
+                cb: |p, idx, input|{
                     std::process::exit(0);
                 },
             };

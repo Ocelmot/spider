@@ -16,7 +16,7 @@ use super::{sender::ProcessorSender, dataset::DatasetProcessorMessage};
 mod settings;
 
 mod message;
-pub use message::{UiProcessorMessage, SettingCategory, SettingType};
+pub use message::{UiProcessorMessage};
 
 pub(crate) struct UiProcessor {
     sender: Sender<UiProcessorMessage>,
@@ -55,7 +55,10 @@ struct UiProcessorState {
     pages: UiPageList,
     subscribers: BTreeSet<Relation>,
     dataset_subscriptions: HashMap<AbsoluteDatasetPath, isize>,
-    settings_callbacks: HashMap<String, fn(&mut ProcessorSender, UiInput)>,
+
+    // Settings properties
+
+    settings_callbacks: HashMap<String, Vec<fn(&mut ProcessorSender, u32, UiInput)>>,
 }
 
 impl UiProcessorState {
@@ -75,6 +78,7 @@ impl UiProcessorState {
             subscribers: BTreeSet::new(),
 
             dataset_subscriptions: HashMap::new(),
+
             settings_callbacks: HashMap::new(),
         }
     }
@@ -98,12 +102,12 @@ impl UiProcessorState {
                         self.ui_to_subscribers(msg).await;
                     }
                     UiProcessorMessage::SetSetting {
-                        category,
-                        name,
-                        setting_type,
-                        callback,
+                        header,
+                        title,
+                        inputs,
+                        cb,
                     } => {
-                        self.add_setting(category, name, setting_type, callback).await;
+                        self.add_setting(header, title, inputs, cb).await;
                     }
                     UiProcessorMessage::Upkeep => {}
                 }
@@ -143,7 +147,7 @@ impl UiProcessorState {
             UiMessage::InputFor(peripheral_id, element_id, dataset_ids, input) => {
                 // if this is for the settings page, put it there
                 if self.state.self_id().await == peripheral_id {
-                    self.settings_input(&element_id, input).await;
+                    self.settings_input(&element_id, dataset_ids, input).await;
                 }else{
                     // recieve an input from the ui and route it to the peripheral
                     let msg = Message::Ui(UiMessage::Input(element_id, dataset_ids, input));
@@ -210,24 +214,28 @@ impl UiProcessorState {
 
     async fn update_dataset_summary(&mut self, summary: UpdateSummary){
         for (path, delta) in summary.dataset_subscriptions() {
-            match self.dataset_subscriptions.get_mut(path){
-                Some(count) => {
-                    *count += delta;
-                    if count <= &mut 0 {
-                        // unsubscribe + remove entry
-                        self.sender.send_dataset(DatasetProcessorMessage::UiUnsubscribe(path.clone())).await;
-                        self.dataset_subscriptions.remove(path);
-                    }
-                },
-                None => {
-                    // subscribe if positive delta (negative shouldnt happen)
-                    if delta > &0 {
-                        self.dataset_subscriptions.insert(path.clone(), *delta);
-                        // send subscription message
-                        self.sender.send_dataset(DatasetProcessorMessage::UiSubscribe(path.clone())).await;
-                    }
-                },
-            }
+            self.update_dataset_subscriptions(path, *delta).await;
+        }
+    }
+
+    async fn update_dataset_subscriptions(&mut self, path: &AbsoluteDatasetPath, delta: isize){
+        match self.dataset_subscriptions.get_mut(path){
+            Some(count) => {
+                *count += delta;
+                if count <= &mut 0 {
+                    // unsubscribe + remove entry
+                    self.sender.send_dataset(DatasetProcessorMessage::UiUnsubscribe(path.clone())).await;
+                    self.dataset_subscriptions.remove(path);
+                }
+            },
+            None => {
+                // subscribe if positive delta (negative shouldnt happen)
+                if delta > 0 {
+                    self.dataset_subscriptions.insert(path.clone(), delta);
+                    // send subscription message
+                    self.sender.send_dataset(DatasetProcessorMessage::UiSubscribe(path.clone())).await;
+                }
+            },
         }
     }
 }
