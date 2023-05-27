@@ -45,15 +45,9 @@ pub(crate) enum Protocol {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {
-    Peripheral(PeripheralMessage),
     Ui(UiMessage),
     Dataset(DatasetMessage),
     Event(EventMessage),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PeripheralMessage {
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

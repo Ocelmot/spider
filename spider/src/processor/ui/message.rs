@@ -3,7 +3,7 @@ use spider_link::{
     Relation,
 };
 
-use crate::processor::sender::ProcessorSender;
+use crate::processor::message::ProcessorMessage;
 
 pub enum UiProcessorMessage {
     RemoteMessage(Relation, UiMessage),
@@ -12,7 +12,11 @@ pub enum UiProcessorMessage {
         header: String,
         title: String,
         inputs: Vec<(String, String)>,
-        cb: fn(&mut ProcessorSender, u32, UiInput)
+        cb: fn(u32, &String, UiInput)->Option<ProcessorMessage>
+    },
+    RemoveSetting {
+        header: String,
+        title: String,
     },
     Upkeep,
 }
@@ -41,6 +45,14 @@ impl std::fmt::Debug for UiProcessorMessage {
                 .field("title", title)
                 .field("inputs", inputs)
                 .field("cb", &"<redacted impl>")
+                .finish(),
+            Self::RemoveSetting {
+                header,
+                title
+            } => f
+                .debug_struct("SetSetting")
+                .field("header", header)
+                .field("title", title)
                 .finish(),
             Self::Upkeep => write!(f, "Upkeep"),
         }

@@ -27,7 +27,7 @@ mod ui;
 use ui::{UiProcessor, UiProcessorMessage};
 
 mod peripherals;
-use peripherals::Peripherals;
+use peripherals::PeripheralsProcessor;
 
 mod dataset;
 use dataset::DatasetProcessor;
@@ -101,7 +101,7 @@ struct Processor {
 
     listener: Listener,
     router: RouterProcessor,
-    peripherals: Peripherals,
+    peripherals: PeripheralsProcessor,
     ui: UiProcessor,
     dataset_processor: DatasetProcessor,
 
@@ -123,7 +123,7 @@ impl Processor {
         let router = RouterProcessor::new(config.clone(), state.clone(), sender.clone());
 
         // start peripherals
-        let peripherals = Peripherals::new(config.clone(), state.clone(), sender.clone());
+        let peripherals = PeripheralsProcessor::new(config.clone(), state.clone(), sender.clone());
 
         // start ui
         let ui = UiProcessor::new(config.clone(), state.clone(), sender.clone());
@@ -176,7 +176,7 @@ impl Processor {
                 header: String::from("System"),
                 title: String::from("Exit!"),
                 inputs: vec![("button".to_string(), "Exit".to_string())],
-                cb: |p, idx, input|{
+                cb: |idx, title, input|{
                     std::process::exit(0);
                 },
             };
@@ -208,7 +208,6 @@ impl Processor {
                                     .send(DatasetProcessorMessage::PublicMessage(relation, msg))
                                     .await;
                             },
-                            Message::Peripheral(peripheral) => {}
                             Message::Event(event) => {
                                 self.router
                                     .send(router::RouterProcessorMessage::RouteEvent(event))
@@ -222,9 +221,14 @@ impl Processor {
                     ProcessorMessage::UiMessage(msg) => {
                         self.ui.send(msg).await;
                     }
+                    
                     ProcessorMessage::DatasetMessage(msg) => {
                         self.dataset_processor.send(msg).await;
                     }
+                    ProcessorMessage::PeripheralMessage(msg) => {
+                        self.peripherals.send(msg).await;
+                    }
+
                     ProcessorMessage::Upkeep => {
                         self.state.save_file().await;
                     }

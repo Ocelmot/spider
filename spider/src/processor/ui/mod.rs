@@ -11,7 +11,7 @@ use tokio::{
 
 use crate::{config::SpiderConfig, state_data::StateData};
 
-use super::{sender::ProcessorSender, dataset::DatasetProcessorMessage};
+use super::{sender::ProcessorSender, dataset::DatasetProcessorMessage, message::ProcessorMessage};
 
 mod settings;
 
@@ -58,7 +58,7 @@ struct UiProcessorState {
 
     // Settings properties
 
-    settings_callbacks: HashMap<String, Vec<fn(&mut ProcessorSender, u32, UiInput)>>,
+    settings_callbacks: HashMap<String, (HashMap<String, usize>, Vec<(String, fn(u32, &String, UiInput)->Option<ProcessorMessage>)>)>,
 }
 
 impl UiProcessorState {
@@ -108,6 +108,9 @@ impl UiProcessorState {
                         cb,
                     } => {
                         self.add_setting(header, title, inputs, cb).await;
+                    }
+                    UiProcessorMessage::RemoveSetting{header, title} => {
+                        self.remove_setting(header, title).await;
                     }
                     UiProcessorMessage::Upkeep => {}
                 }

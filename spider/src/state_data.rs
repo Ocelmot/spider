@@ -1,4 +1,4 @@
-use std::{fs, path::{Path, PathBuf}, io, sync::Arc};
+use std::{fs, path::{Path, PathBuf}, io, sync::Arc, collections::HashMap};
 use spider_link::{SpiderId2048, SelfRelation, Role};
 use serde::{Serialize, Deserialize};
 use lru::LruCache;
@@ -7,7 +7,7 @@ use rsa::{RsaPrivateKey, pkcs8::{DecodePrivateKey, EncodePrivateKey}};
 
 
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard, MappedMutexGuard};
 
 
 
@@ -68,6 +68,11 @@ impl StateData {
         SelfRelation::from_key(key, Role::Peer)
     }
 
+    // Pheripheral items
+    pub async fn peripheral_services(&self) -> MappedMutexGuard<'_, HashMap<std::string::String, bool>> {
+        let inner = self.inner.lock().await;
+        MutexGuard::map(inner, |f| &mut f.peripheral_services)
+    }
 
 }
 
@@ -77,6 +82,9 @@ impl StateData {
 struct StateDataInner{
     pub key_der: Vec<u8>,
     
+    // Peripheral items
+    #[serde(default)]
+    pub peripheral_services: HashMap<String, bool>,
 }
 
 
@@ -84,6 +92,9 @@ impl StateDataInner {
     fn new(key_der: Vec<u8>) -> Self{
         Self{
             key_der,
+
+            // Peripheral items
+            peripheral_services: HashMap::new(),
         }
     }
 }

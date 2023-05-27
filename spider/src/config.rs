@@ -22,6 +22,8 @@ pub struct SpiderConfig{
     // List<Router config>
 
     // No peripheral configurations
+    #[serde(default)]
+    peripheral_path: Option<String>,
 
     // UI Config
     // UIConfig
@@ -41,6 +43,11 @@ impl SpiderConfig {
         // let data = fs::read_to_string(&path).expect(&format!("Failed to read config file: {:?}", path));
 		let config = serde_json::from_str(&data).expect("Failed to deserialize config");
         config
+    }
+
+    pub fn peripheral_path(&self)-> PathBuf{
+        let s = self.peripheral_path.clone().unwrap_or(String::from("peripherals"));
+        PathBuf::from(s)
     }
 
     pub fn dataset_path(&self)-> PathBuf{

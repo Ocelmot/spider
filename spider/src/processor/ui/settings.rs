@@ -5,7 +5,7 @@ use spider_link::{
     message::{UiPage, UiElementKind, UiPath, UiMessage, UiElement, UiInput, DatasetPath, UiElementContent, UiElementContentPart, DatasetData, DatasetMessage},
 };
 
-use crate::processor::{sender::ProcessorSender, dataset::DatasetProcessorMessage};
+use crate::processor::{dataset::DatasetProcessorMessage, message::ProcessorMessage};
 
 use super::{
     UiProcessorState,
@@ -25,7 +25,7 @@ impl UiProcessorState {
         mgr.get_changes(); // flush changes, since this will occur before UIs are connected, dont have to send anywhere.
     }
 
-    pub(crate) async fn add_setting(&mut self, header: String, title: String, inputs: Vec<(String, String)>, cb: fn(&mut ProcessorSender, u32, UiInput)) {
+    pub(crate) async fn add_setting(&mut self, header: String, title: String, inputs: Vec<(String, String)>, cb: fn(u32, &String, UiInput)->Option<ProcessorMessage>) {
         let id = self.state.self_id().await;
 
         // find header
@@ -112,7 +112,7 @@ impl UiProcessorState {
         };
 
         
-        // insert into dataset
+        // Create Dataset Item
         let null_inputs = vec![("none".to_string(), String::new()); 3];
         let mut map = HashMap::new();
         map.insert("header".to_string(), DatasetData::String(header.clone()));
@@ -124,23 +124,77 @@ impl UiProcessorState {
         let data_item = DatasetData::Map(map);
         let dataset_path = DatasetPath::new_private(vec!["settings".to_string(), header.clone()]);
         let rel = self.state.self_relation().await.relation;
-        self.sender.send_dataset(DatasetProcessorMessage::PublicMessage(rel, DatasetMessage::Append { path: dataset_path, data: data_item })).await;
+
+        
 
         // Register input callback
         match self.settings_callbacks.get_mut(&header){
-            Some(list) => {
-                list.push(cb);
+            Some((title_map, list)) => {
+                // test if title exists
+                match title_map.get(&title){
+                    Some(index) => {
+                        // Index exists, update existing
+                        list[*index] = (title.clone(), cb);
+
+                        // update dataset item
+                        let dataset_message = DatasetMessage::SetElement { path: dataset_path, data: data_item, id: *index };
+                        let dataset_processor_message = DatasetProcessorMessage::PublicMessage(rel, dataset_message);
+                        self.sender.send_dataset(dataset_processor_message).await;
+                    },
+                    None => {
+                        // Index does not exist, push to back
+                        title_map.insert(title.clone(), list.len());
+                        list.push((title.clone(), cb));
+
+                        // Insert dataset item
+                        self.sender.send_dataset(DatasetProcessorMessage::PublicMessage(rel, DatasetMessage::Append { path: dataset_path, data: data_item })).await;
+                    },
+                }
             },
             None => {
-                let list = vec![cb];
-                self.settings_callbacks.insert(header, list);
+                // save callback
+                let title_map = HashMap::new();
+                let list = vec![(title.clone(), cb)];
+                self.settings_callbacks.insert(header, (title_map, list));
+
+                // Insert dataset item
+                self.sender.send_dataset(DatasetProcessorMessage::PublicMessage(rel, DatasetMessage::Append { path: dataset_path, data: data_item })).await;
             },
         }       
     }
 
+    pub(crate) async fn remove_setting(&mut self, header: String, title: String,){
+        match self.settings_callbacks.get_mut(&header){
+            Some((title_map, list)) => {
+                match title_map.remove(&title){
+                    Some(index) => {
+                        list.remove(index);
+                        // must update all entries in title map that are greater than index
+                        // it might be better to do this when the dataset updates
+                        for (_, map_index) in title_map{
+                            if *map_index > index {
+                                *map_index -= 1;
+                            }
+                        }
+
+                        // remove from dataset as well
+                        let dataset_path = DatasetPath::new_private(vec!["settings".to_string(), header.clone()]);
+                        let rel = self.state.self_relation().await.relation;
+
+                        let dataset_message = DatasetMessage::DeleteElement { path: dataset_path, id: index };
+                        let dataset_processor_message = DatasetProcessorMessage::PublicMessage(rel, dataset_message);
+                        self.sender.send_dataset(dataset_processor_message).await;
+                    },
+                    None => {}, // no title, nothing to remove
+                }
+            },
+            None => {}, // No header, nothing to remove
+        }
+    }
+
     pub(crate) async fn settings_input(&mut self, element_id: &String, dataset_ids: Vec<usize>, input: UiInput){
         let mut element_id = element_id.to_string();
-        let mut input_index = match element_id.pop(){
+        let input_index = match element_id.pop(){
             Some(elem) => {
                 match elem.to_digit(10){
                     Some(num) => num,
@@ -152,12 +206,17 @@ impl UiProcessorState {
         let header = element_id;
 
         match self.settings_callbacks.get_mut(&header){
-            Some(list) => {
+            Some((x, list)) => {
                 let func_index = dataset_ids.last().unwrap(); // get innermost dataset id
                 match list.get_mut(*func_index) {
-                    Some(func) => {
-
-                        func(&mut self.sender, input_index, input);
+                    Some((title, func)) => {
+                        let msg = func(input_index, title, input);
+                        match msg{
+                            Some(msg) => {
+                                self.sender.send(msg).await;
+                            },
+                            None => {},
+                        }
                     },
                     None => {
                         // No such function in list
