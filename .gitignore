@@ -3,3 +3,4 @@
 *.json
 *.dat
 /spider/datasets
+/spider/peripherals

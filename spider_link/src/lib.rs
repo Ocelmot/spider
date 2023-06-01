@@ -14,16 +14,57 @@ pub mod beacon;
 
 pub type SpiderId2048 = SpiderId<294>; // 2048 bit pub key takes 294 bytes
 
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Role {
     Peripheral,
     Peer,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub struct Relation {
     pub role: Role,
     pub id: SpiderId2048,
+}
+
+impl Relation{
+    pub fn is_peripheral(&self) -> bool{
+        if let Role::Peripheral = self.role{
+            true
+        }else{
+            false
+        }
+    }
+
+    pub fn is_peer(&self) -> bool{
+        if let Role::Peer = self.role{
+            true
+        }else{
+            false
+        }
+    }
+
+    pub fn peripheral_from_base_64<S: Into<String>>(s: S) -> Option<Self>{
+        match SpiderId2048::from_base64(s) {
+            Some(id) => {
+                Some(Self {
+                    role: Role::Peripheral,
+                    id
+                })
+            },
+            None => None,
+        }
+    }
+    pub fn peer_from_base_64<S: Into<String>>(s: S) -> Option<Self>{
+        match SpiderId2048::from_base64(s) {
+            Some(id) => {
+                Some(Self {
+                    role: Role::Peer,
+                    id
+                })
+            },
+            None => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

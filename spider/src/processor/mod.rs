@@ -33,6 +33,7 @@ mod dataset;
 use dataset::DatasetProcessor;
 
 use self::dataset::DatasetProcessorMessage;
+use self::router::RouterProcessorMessage;
 
 
 pub struct ProcessorBuilder {
@@ -154,7 +155,7 @@ impl Processor {
             ui,
             dataset_processor,
 
-            print_msg: true,
+            print_msg: false,
 
             upkeep_interval_handle,
         }
@@ -171,7 +172,18 @@ impl Processor {
                 tokio::fs::write(&*path, data).await;
             }
 
-            // setup setting to disable printing messages
+            let id = self.state.self_id().await.to_base64();
+
+            // Cheat to show the base' client id
+            let msg = UiProcessorMessage::SetSetting {
+                header: String::from("System"),
+                title: id,
+                inputs: vec![],
+                cb: |_, _, _|{None},
+            };
+            self.ui.send(msg).await;
+
+            // Button to exit the spider base
             let msg = UiProcessorMessage::SetSetting {
                 header: String::from("System"),
                 title: String::from("Exit!"),
@@ -181,6 +193,7 @@ impl Processor {
                 },
             };
             self.ui.send(msg).await;
+
 
             loop {
                 let message = self.receiver.recv().await;
@@ -198,9 +211,9 @@ impl Processor {
                 match message {
                     ProcessorMessage::RemoteMessage(relation, message) => {
                         match message {
-                            Message::Ui(ui) => {
+                            Message::Ui(msg) => {
                                 self.ui
-                                    .send(UiProcessorMessage::RemoteMessage(relation, ui))
+                                    .send(UiProcessorMessage::RemoteMessage(relation, msg))
                                     .await.unwrap();
                             }
                             Message::Dataset(msg) => {
@@ -208,9 +221,9 @@ impl Processor {
                                     .send(DatasetProcessorMessage::PublicMessage(relation, msg))
                                     .await;
                             },
-                            Message::Event(event) => {
+                            Message::Router(msg) => {
                                 self.router
-                                    .send(router::RouterProcessorMessage::RouteEvent(event))
+                                    .send(RouterProcessorMessage::PeripheralMessage(relation, msg))
                                     .await;
                             }
                         }

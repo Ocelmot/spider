@@ -1,4 +1,4 @@
-use crate::{Role, SpiderId2048};
+use crate::{Role, SpiderId2048, Relation};
 
 use serde::{Deserialize, Serialize};
 
@@ -47,11 +47,12 @@ pub(crate) enum Protocol {
 pub enum Message {
     Ui(UiMessage),
     Dataset(DatasetMessage),
-    Event(EventMessage),
+    Router(RouterMessage),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EventMessage {
-    name: String,
-    data: Vec<u8>,
+pub enum RouterMessage {
+    Event(String, Vec<Relation>, DatasetData),
+    Subscribe(String),
+    Unsubscribe(String),
 }

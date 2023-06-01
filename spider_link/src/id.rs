@@ -33,6 +33,23 @@ impl<const BYTE_SIZE: usize> SpiderId<BYTE_SIZE>{
     pub fn to_base64(&self) -> String{
         general_purpose::URL_SAFE_NO_PAD.encode(self.bytes)
     }
+    pub fn from_base64<S: Into<String>>(s: S) -> Option<Self>{
+        let input = s.into();
+        // general_purpose::URL_SAFE_NO_PAD.encode(self.bytes)
+        match general_purpose::URL_SAFE_NO_PAD.decode(input){
+            Ok(bytes) => {
+                match bytes.try_into(){
+                    Ok(bytes) => {
+                        Some(Self {
+                            bytes
+                        })
+                    },
+                    Err(_) => None,
+                }
+            },
+            Err(_) => None,
+        }
+    }
 
     pub fn sha256(&self) -> String{
         sha256::digest(&self.bytes)
@@ -132,7 +149,8 @@ impl<const BYTE_SIZE: usize> ChordId for SpiderId<BYTE_SIZE>{
 
     fn calculate_finger(&self, index: u32) -> Self {
 		let mut big_num = self.as_big_uint();
-		let offset = 2u32.pow(index - 1);
+        let offset = BigUint::new(vec![2]).pow(index - 1);
+		// let offset = 2u32.pow(index - 1);
 		big_num += offset;
         big_num = big_num % Self::wrap_point().as_big_uint();
         let bytes: [u8; BYTE_SIZE] = big_num.to_bytes_be().try_into().unwrap();

@@ -1,5 +1,5 @@
 /// included libraries
-use std::{env, io::{self, ErrorKind}, path::{Path, PathBuf}};
+use std::{env, io::{self, ErrorKind}, path::{Path, PathBuf}, time::Duration};
 
 use tracing::{info, debug, error};
 use tracing_appender::rolling::{Rotation, RollingFileAppender};
@@ -21,24 +21,30 @@ async fn main() -> Result<(), io::Error> {
 	// command line arguments: <filename>
 	// filename is name of config file, defaults to config.json
 
+	// setup tokio debugger
+	// console_subscriber::ConsoleLayer::builder()
+    //     .retention(Duration::from_secs(60))
+    //     .server_addr(([127, 0, 0, 1], 6669))
+    //     .init();
+
 	// load config file
 	let config = load_config();
 
 	
 
 	// Setup tracing
-	let filter = filter_fn(|metadata|{
-		metadata.target() == "spider"
-	});
+	// let filter = filter_fn(|metadata|{
+	// 	metadata.target() == "spider"
+	// });
 	
-	let log_path = config.log_path.clone();
-	let file_appender = RollingFileAppender::new(Rotation::NEVER, "", log_path);
-	let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-	let subscriber = tracing_subscriber::fmt()
-		.pretty().with_ansi(false)
-		.with_writer(non_blocking)
-		.finish();
-	subscriber.with(filter).init();
+	// let log_path = config.log_path.clone();
+	// let file_appender = RollingFileAppender::new(Rotation::NEVER, "", log_path);
+	// let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+	// let subscriber = tracing_subscriber::fmt()
+	// 	.pretty().with_ansi(false)
+	// 	.with_writer(non_blocking)
+	// 	.finish();
+	// subscriber.with(filter).init();
 
 	info!("Starting!");
 	info!("Loaded config: {:?}", config);

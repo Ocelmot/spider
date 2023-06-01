@@ -10,6 +10,8 @@ use serde::{Serialize, Deserialize};
 pub struct SpiderConfig{
     #[serde(default = "default_listen_addr")]
     pub listen_addr: String,
+    #[serde(default = "default_pub_addr")]
+    pub pub_addr: String,
     #[serde(default = "default_log_path")]
     pub log_path: String,
     #[serde(default = "default_state_data_path")]
@@ -61,6 +63,10 @@ impl SpiderConfig {
 
 // Defaults
 fn default_listen_addr() -> String {
+    "0.0.0.0:1930".into()
+}
+
+fn default_pub_addr() -> String {
     "0.0.0.0:1930".into()
 }
 

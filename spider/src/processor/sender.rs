@@ -1,4 +1,4 @@
-use spider_link::{message::{Message, EventMessage}, Relation};
+use spider_link::{message::{Message, RouterMessage}, Relation};
 use tokio::sync::mpsc::{error::SendError, Sender};
 
 use super::{message::ProcessorMessage, router::RouterProcessorMessage, ui::UiProcessorMessage, dataset::DatasetProcessorMessage};
@@ -35,16 +35,6 @@ impl ProcessorSender {
         msg: Message,
     ) -> Result<(), SendError<ProcessorMessage>> {
         let msg = RouterProcessorMessage::MulticastMessage(rels, msg);
-        let msg = ProcessorMessage::RouterMessage(msg);
-        self.sender.send(msg).await
-    }
-
-    // route event
-    pub(crate) async fn route_event(
-        &mut self,
-        msg: EventMessage,
-    ) -> Result<(), SendError<ProcessorMessage>> {
-        let msg = RouterProcessorMessage::RouteEvent(msg);
         let msg = ProcessorMessage::RouterMessage(msg);
         self.sender.send(msg).await
     }
