@@ -33,6 +33,7 @@ mod dataset;
 use dataset::DatasetProcessor;
 
 use self::dataset::DatasetProcessorMessage;
+use self::peripherals::PeripheralProcessorMessage;
 use self::router::RouterProcessorMessage;
 
 
@@ -243,6 +244,10 @@ impl Processor {
                     }
 
                     ProcessorMessage::Upkeep => {
+                        self.ui.send(UiProcessorMessage::Upkeep).await;
+                        self.dataset_processor.send(DatasetProcessorMessage::Upkeep).await;
+                        self.router.send(RouterProcessorMessage::Upkeep).await;
+                        self.peripherals.send(PeripheralProcessorMessage::Upkeep).await;
                         self.state.save_file().await;
                     }
                 }

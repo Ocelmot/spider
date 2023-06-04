@@ -14,6 +14,8 @@ use crate::{config::SpiderConfig, state_data::StateData};
 
 use super::{message::ProcessorMessage, sender::ProcessorSender, ui::UiProcessorMessage};
 
+mod event;
+
 mod message;
 pub use message::RouterProcessorMessage;
 
@@ -212,65 +214,13 @@ impl RouterProcessorState {
 
     async fn process_remote_message(&mut self, rel: Relation, msg: RouterMessage) {
         match msg {
-            RouterMessage::Event(name, externals, data) => {
-                // Send to subscribers
-                let mut recipients = HashSet::new();
-                if let Some(subscriber_set) = self.subscribers.get(&name){
-                    for subscriber in subscriber_set{
-                        // Check if source is external and dest is external, skip
-                        if rel.is_peer() && subscriber.is_peer(){
-                            continue;
-                        }
-                        if let Some(link) = self.links.get_mut(subscriber){
-                            recipients.insert(subscriber.clone());
-                            let router_msg = RouterMessage::Event(name.clone(), vec![], data.clone());
-                            let msg = Message::Router(router_msg);
-                            link.send(msg).await;
-                        }
-                    }
-                }
-                // send to externals
-                for external in externals{
-                    if recipients.contains(&external){
-                        continue; // this recipient already recieved message via subscription
-                    }
-                    println!("Sending message to external...");
-                    match self.links.get_mut(&external){
-                        Some(link) => {
-                            // send to already-connected link
-                            println!("Link is connected");
-                            let router_msg = RouterMessage::Event(name.clone(), vec![], data.clone());
-                            let msg = Message::Router(router_msg);
-                            link.send(msg).await;
-                            println!("Sent");
-                        },
-                        None => {
-                            // insert into pending links
-                            println!("Link is pending");
-                            match self.pending_links.get_mut(&external) {
-                                Some((_, tries, pending_msgs)) => {
-                                    println!("adding message to entry");
-                                    let router_msg = RouterMessage::Event(name.clone(), vec![], data.clone());
-                                    let msg = Message::Router(router_msg);
-                                    pending_msgs.push(msg);
-                                    *tries = 0;
-                                },
-                                None => {
-                                    // not already in, need to init connection requests
-                                    println!("new pending entry");
-                                    let router_msg = RouterMessage::Event(name.clone(), vec![], data.clone());
-                                    let msg = Message::Router(router_msg);
-                                    let pending_msgs = vec![msg];
-                                    let mut t = Instant::now();
-                                    t = t - Duration::from_secs(600);
-                                    self.pending_links.insert(external.clone(), (t, 0u8, pending_msgs));
-                                    // start connection process
-                                    self.process_pending_link(external).await;
-                                },
-                            }
-                        },
-                    }
-                }
+            RouterMessage::SendEvent(name, externals, data) => {
+                self.handle_send_event(rel.clone(), name, externals, data).await;
+            },
+            RouterMessage::Event(name, _, data) => {
+                // re-route events from peers to appropriate peripherals
+                // The known relation of the link is used as the from field in the event
+                self.handle_event(name, rel, data).await;
             },
             RouterMessage::Subscribe(name) => {
                 if rel.is_peer(){
@@ -394,6 +344,7 @@ impl RouterProcessorState {
     async fn process_pending_links(&mut self){
         let relations: Vec<Relation> = self.pending_links.keys().cloned().collect();
         for relation in relations{
+            println!("Processing pending link for relation");
             self.process_pending_link(relation).await;
         }
     }

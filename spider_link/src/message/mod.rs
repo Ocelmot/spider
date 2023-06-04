@@ -52,7 +52,8 @@ pub enum Message {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RouterMessage {
-    Event(String, Vec<Relation>, DatasetData),
+    SendEvent(String, Vec<Relation>, DatasetData),
+    Event(String, Relation, DatasetData),
     Subscribe(String),
     Unsubscribe(String),
 }
