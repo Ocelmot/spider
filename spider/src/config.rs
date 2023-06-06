@@ -20,9 +20,6 @@ pub struct SpiderConfig{
     #[serde(default)]
     pub keyfile_path: Option<String>,
 
-    // Router configurations
-    // List<Router config>
-
     // No peripheral configurations
     #[serde(default)]
     peripheral_path: Option<String>,

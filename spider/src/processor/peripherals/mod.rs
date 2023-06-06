@@ -130,9 +130,8 @@ impl PeripheralProcessorState{
             if status {
                 self.launch_peripheral_service(name).await;
             } else {
-
+                self.make_setting_entry(name, false).await;
             }
-
         }
         
     }

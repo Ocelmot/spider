@@ -19,6 +19,7 @@ use listener::Listener;
 
 mod router;
 use router::RouterProcessor;
+pub use router::ChordState;
 
 mod message;
 use message::ProcessorMessage;

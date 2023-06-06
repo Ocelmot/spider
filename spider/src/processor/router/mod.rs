@@ -1,6 +1,7 @@
 use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use dht_chord::{chord::ChordHandle, associate::{AssociateRequest, AssociateResponse}, TCPChord};
+use lru::LruCache;
 use spider_link::{
     message::{Message, RouterMessage},
     Link, Relation, Role, SpiderId2048,
@@ -12,9 +13,13 @@ use tokio::{
 
 use crate::{config::SpiderConfig, state_data::StateData};
 
+use self::chord::ChordEntry;
+
 use super::{message::ProcessorMessage, sender::ProcessorSender, ui::UiProcessorMessage};
 
 mod event;
+mod chord;
+pub use chord::ChordState;
 
 mod message;
 pub use message::RouterProcessorMessage;
@@ -58,7 +63,7 @@ pub(crate) struct RouterProcessorState {
 
     subscribers: HashMap<String, HashSet<Relation>>,
 
-    chords: HashMap<String, (ChordHandle<String, SpiderId2048>, Sender<SpiderId2048>)>,
+    chords: HashMap<String, ChordEntry>,
 }
 
 impl RouterProcessorState {
@@ -107,36 +112,17 @@ impl RouterProcessorState {
                     RouterProcessorMessage::MulticastMessage(rels, msg) => {
                         self.multicast_msg(rels, msg).await;
                     }
-
+                    // ===== Chord Operations =====
                     RouterProcessorMessage::JoinChord(addr) => {
-                        let id = self.state.self_id().await;
-                        let mut chord = TCPChord::new("0.0.0.0:1931".to_string(), id.clone());
-                        let pub_addr = self.config.pub_addr.as_bytes();
-                        chord.set_advert(Some(pub_addr.to_vec()));
-                        let handle = chord.start(Some(addr)).await;
-                        self.prepare_chord(handle).await;
+                        self.handle_join_chord(addr).await;
                     },
                     RouterProcessorMessage::HostChord(listen_addr) => {
-                        println!("Hosting chord, listening on: {:?}", listen_addr);
-                        let id = self.state.self_id().await;
-                        let mut chord = TCPChord::new(listen_addr, id.clone());
-                        let pub_addr = self.config.pub_addr.as_bytes();
-                        println!("Chord advertizing for base at: {:?}", pub_addr);
-                        chord.set_advert(Some(pub_addr.to_vec()));
-                        let handle = chord.start(None).await;
-                        self.prepare_chord(handle).await;
+                        self.handle_host_chord(listen_addr).await;
                     },
                     RouterProcessorMessage::LeaveChord(name) => {
-                        if let Some((handle, _)) = self.chords.remove(&name){
-                           handle.stop().await;
-                           // remove entry from settings page
-                           let msg = UiProcessorMessage::RemoveSetting {
-                                header: String::from("Connected Chords"),
-                                title: name
-                            };
-                            self.sender.send_ui(msg).await;
-                        }
+                        self.handle_leave_chord(name).await;
                     },
+
                     RouterProcessorMessage::AddrUpdate(id, addr) => {
                         // if there is already a link for this id, ignore. Otherwise:
                         // create a new link to this address
@@ -158,12 +144,29 @@ impl RouterProcessorState {
                     // add contacts list??!?
                     RouterProcessorMessage::Upkeep => {
                         // should check for disconnected peers, and clean them up
-                        // for (relation, link) in &self.links{
-                        //     link.
-                        // }
 
                         // Process pending links
                         self.process_pending_links().await;
+
+                        // Save chord state
+                        for (name, chord_entry) in self.chords.iter_mut() {
+                            let mut associate = chord_entry.get_associate();
+
+                            associate.send_op(AssociateRequest::GetPeerAddresses).await;
+                            let peer_addrs = match associate.recv_op(None).await {
+                                Some(AssociateResponse::PeerAddresses{addrs}) => {
+                                    addrs
+                                },
+                                _ => {
+                                    // chord has invalid response
+                                    continue;
+                                },
+                            };
+                            let chord_state = chord_entry.get_state_mut();
+                            chord_state.add_addrs(peer_addrs);
+
+                            self.state.put_chord(name, &chord_state).await;
+                        }
                     }
                 }
             }
@@ -208,7 +211,8 @@ impl RouterProcessorState {
         };
         self.sender.send_ui(msg).await;
 
-
+        // Initialize chord functions
+        self.init_chord_functions().await;
 
     }
 
@@ -334,9 +338,9 @@ impl RouterProcessorState {
             *start = Instant::now(); // reset timer
 
             // make connection attempt on all chords in list
-            for (name, (associate, sender)) in self.chords.iter_mut(){
+            for (name, chord_entry) in self.chords.iter_mut(){
                 println!("Making request on chord");
-                sender.send(relation.id.clone()).await;
+                chord_entry.resolve_id(relation.id.clone()).await;
             }
         }
     }
@@ -346,86 +350,6 @@ impl RouterProcessorState {
         for relation in relations{
             println!("Processing pending link for relation");
             self.process_pending_link(relation).await;
-        }
-    }
-
-    async fn prepare_chord(&mut self, handle: ChordHandle<String, SpiderId2048>){
-        let mut assoc = handle.get_associate().await;
-        let (sender, mut receiver) = channel(50);
-        let mut processor = self.sender.clone();
-
-        // Create chord processor task
-        let task_handle = tokio::spawn(async move {
-            loop{
-                select! {
-                    request = receiver.recv() => {
-                        println!("Chordprocessor recvd request");
-                        match request{
-                            Some(id) => {
-                                let msg = AssociateRequest::GetAdvertOf{id};
-                                assoc.send_op(msg).await;
-                            },
-                            None => {
-                                println!("Chordprocessor quitting");
-                                // receiver is over, quit
-                                return;
-                            },
-                        }
-                    },
-                    response = assoc.recv_op(None) => {
-                        println!("Chordprocessor got response");
-                        match response{
-                            Some(response) => {
-                                if let AssociateResponse::AdvertOf { id, data } = response{
-                                    println!("Got advert: {:?}", data);
-                                    if let Some(data) = data{
-                                        if let Ok(addr) = String::from_utf8(data){
-                                            println!("Sending router update: {}", addr.to_string());
-                                            let router_msg = RouterProcessorMessage::AddrUpdate(id, addr.to_string());
-                                            let msg = ProcessorMessage::RouterMessage(router_msg);
-                                            processor.send(msg).await;
-                                        }
-                                    }
-                                }
-                            },
-                            None => {
-                                println!("Chordprocessor quitting II");
-                                // Chord has closed, quit
-                                return;
-                            },
-                        }
-                    }
-                }
-            }
-        });
-        
-        // Create name and Settings entry
-        let entry = (handle, sender);
-        for i in 1.. {
-            let name = format!("Chord #{i}");
-            if !self.chords.contains_key(&name){
-                
-                // add to config list
-                let msg = UiProcessorMessage::SetSetting {
-                    header: String::from("Connected Chords"),
-                    title: name.clone(),
-                    inputs: vec![("button".to_string(), "Remove".to_string())],
-                    cb: |idx, name, input|{
-                        match input{
-                            spider_link::message::UiInput::Click => {
-                                let router_msg = RouterProcessorMessage::LeaveChord(name.to_string());
-                                let msg = ProcessorMessage::RouterMessage(router_msg);
-                                Some(msg)
-                            },
-                            spider_link::message::UiInput::Text(_) => None,
-                        }
-                    },
-                };
-                self.sender.send_ui(msg).await;
-                
-                self.chords.insert(name, entry);
-                break;
-            }
         }
     }
 

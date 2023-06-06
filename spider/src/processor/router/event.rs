@@ -6,14 +6,6 @@ use tokio::time::Instant;
 use super::RouterProcessorState;
 
 
-
-
-
-
-
-
-
-
 // event handling functions
 impl RouterProcessorState{
     pub(crate) async fn handle_send_event(&mut self, from: Relation, name: String, externals: Vec<Relation>, data: DatasetData){

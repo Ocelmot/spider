@@ -1,4 +1,5 @@
-use std::{fs, path::{Path, PathBuf}, io, sync::Arc, collections::HashMap};
+use std::{fs, path::{Path, PathBuf}, io, sync::Arc, collections::{HashMap, hash_map::Keys}};
+use dht_chord::chord::Chord;
 use spider_link::{SpiderId2048, SelfRelation, Role};
 use serde::{Serialize, Deserialize};
 use lru::LruCache;
@@ -8,6 +9,8 @@ use rsa::{RsaPrivateKey, pkcs8::{DecodePrivateKey, EncodePrivateKey}};
 
 
 use tokio::sync::{Mutex, MutexGuard, MappedMutexGuard};
+
+use crate::processor::ChordState;
 
 
 
@@ -68,12 +71,48 @@ impl StateData {
         SelfRelation::from_key(key, Role::Peer)
     }
 
-    // Pheripheral items
+    // Pheripheral Items
     pub async fn peripheral_services(&self) -> MappedMutexGuard<'_, HashMap<std::string::String, bool>> {
         let inner = self.inner.lock().await;
         MutexGuard::map(inner, |f| &mut f.peripheral_services)
     }
 
+    // Router Items
+    pub async fn chord_names(&self) -> Vec<String>{
+        let inner = self.inner.lock().await;
+        inner.chords.keys().cloned().collect()
+    }
+    pub async fn get_chord(&self, name: &String) -> Option<ChordState>{
+        let inner = self.inner.lock().await;
+
+        match inner.chords.get(name){
+            Some((listen_addr, pub_addr, advert_addr, addrs)) => {
+                let listen_addr = listen_addr.to_string();
+                let pub_addr = pub_addr.to_string();
+                let advert_addr = advert_addr.to_string();
+                let mut state = ChordState::new(listen_addr, pub_addr, advert_addr);
+                state.add_addrs(addrs.clone());
+                Some(state)
+            },
+            None => None,
+        }
+    }
+
+    pub async fn put_chord(&mut self, name: &String, chord: &ChordState){
+        let mut inner = self.inner.lock().await;
+
+        let listen_addr = chord.listen_addr.clone();
+        let pub_addr = chord.pub_addr.clone();
+        let advert_addr = chord.advert_addr.clone();
+        let addrs = chord.get_addrs().map(|x|{x.0.clone()}).collect();
+        let state = (listen_addr, pub_addr, advert_addr, addrs);
+        inner.chords.insert(name.clone(), state);
+    }
+    pub async fn remove_chord(&mut self, name: &String){
+        let mut inner = self.inner.lock().await;
+
+        inner.chords.remove(name);
+    }
 }
 
 
@@ -82,9 +121,14 @@ impl StateData {
 struct StateDataInner{
     pub key_der: Vec<u8>,
     
-    // Peripheral items
+    // Peripheral Items
     #[serde(default)]
     pub peripheral_services: HashMap<String, bool>,
+
+    // Router Items
+    /// Map from chord names to listen_adder, pub_addr, and vectors of recent addresses
+    #[serde(default)]
+    chords: HashMap<String, (String, String, String, Vec<String>)>,
 }
 
 
@@ -93,8 +137,11 @@ impl StateDataInner {
         Self{
             key_der,
 
-            // Peripheral items
+            // Peripheral Items
             peripheral_services: HashMap::new(),
+
+            // Router Items
+            chords: HashMap::new(),
         }
     }
 }
