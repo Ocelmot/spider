@@ -106,7 +106,7 @@ impl PeripheralProcessorState{
             header: String::from("Peripheral Services"),
             title: String::from("Install:"),
             inputs: vec![("textentry".to_string(), "Git Path".to_string())],
-            cb: |idx, name, input|{
+            cb: |idx, name, input, _|{
                 match input{
                     spider_link::message::UiInput::Click => None,
                     spider_link::message::UiInput::Text(addr) => {
@@ -116,6 +116,7 @@ impl PeripheralProcessorState{
                     },
                 }
             },
+            data: String::new(),
         };
         self.sender.send_ui(msg).await;
 
@@ -356,8 +357,8 @@ impl PeripheralProcessorState{
 
     async fn make_setting_entry(&mut self, name: String, running: bool){
         let (start_stop, cb) = match running {
-            true => ("Stop".to_string(), cb_with_stop as fn(u32, &String, UiInput) -> Option<ProcessorMessage>),
-            false => ("Start".to_string(), cb_with_start as fn(u32, &String, UiInput) -> Option<ProcessorMessage>),
+            true => ("Stop".to_string(), cb_with_stop as fn(u32, &String, UiInput, &mut String) -> Option<ProcessorMessage>),
+            false => ("Start".to_string(), cb_with_start as fn(u32, &String, UiInput, &mut String) -> Option<ProcessorMessage>),
         };
         let msg = UiProcessorMessage::SetSetting {
             header: String::from("Peripheral Services"),
@@ -367,6 +368,7 @@ impl PeripheralProcessorState{
                 ("button".to_string(), "Remove".to_string())
             ],
             cb,
+            data: String::new(),
         };
         self.sender.send_ui(msg).await;
     }
@@ -374,7 +376,7 @@ impl PeripheralProcessorState{
 
 
 
-fn cb_with_stop(idx: u32, name: &String, input: UiInput) -> Option<ProcessorMessage>{
+fn cb_with_stop(idx: u32, name: &String, input: UiInput, data: &mut String) -> Option<ProcessorMessage>{
     match idx{
         0 => {
             match input{
@@ -400,7 +402,7 @@ fn cb_with_stop(idx: u32, name: &String, input: UiInput) -> Option<ProcessorMess
     }
 }
 
-fn cb_with_start(idx: u32, name: &String, input: UiInput) -> Option<ProcessorMessage>{
+fn cb_with_start(idx: u32, name: &String, input: UiInput, data: &mut String) -> Option<ProcessorMessage>{
     match idx{
         0 => {
             match input{

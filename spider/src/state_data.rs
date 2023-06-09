@@ -1,8 +1,6 @@
-use std::{fs, path::{Path, PathBuf}, io, sync::Arc, collections::{HashMap, hash_map::Keys}};
-use dht_chord::chord::Chord;
-use spider_link::{SpiderId2048, SelfRelation, Role};
+use std::{fs, path::{Path, PathBuf}, io, sync::Arc, collections::HashMap};
+use spider_link::{SpiderId2048, SelfRelation, Role, Relation, message::DirectoryEntry};
 use serde::{Serialize, Deserialize};
-use lru::LruCache;
 
 use rsa::{RsaPrivateKey, pkcs8::{DecodePrivateKey, EncodePrivateKey}};
 
@@ -72,7 +70,7 @@ impl StateData {
     }
 
     // Pheripheral Items
-    pub async fn peripheral_services(&self) -> MappedMutexGuard<'_, HashMap<std::string::String, bool>> {
+    pub async fn peripheral_services(&self) -> MappedMutexGuard<'_, HashMap<String, bool>> {
         let inner = self.inner.lock().await;
         MutexGuard::map(inner, |f| &mut f.peripheral_services)
     }
@@ -113,6 +111,24 @@ impl StateData {
 
         inner.chords.remove(name);
     }
+
+    pub async fn load_directory(&mut self) -> HashMap<Relation, DirectoryEntry>{
+        let inner = self.inner.lock().await;
+        let mut ret = HashMap::new();
+        for entry in &inner.directory{
+            let rel = entry.relation().clone();
+            ret.insert(rel, entry.clone());
+        }
+        ret
+    }
+    pub async fn save_directory(&mut self, directory: &HashMap<Relation, DirectoryEntry>) {
+        let mut v = Vec::with_capacity(directory.len());
+        for (_, entry) in directory {
+            v.push(entry.clone());
+        }
+        let mut inner = self.inner.lock().await;
+        inner.directory = v;
+    }
 }
 
 
@@ -129,6 +145,8 @@ struct StateDataInner{
     /// Map from chord names to listen_adder, pub_addr, and vectors of recent addresses
     #[serde(default)]
     chords: HashMap<String, (String, String, String, Vec<String>)>,
+    #[serde(default)]
+    directory: Vec<DirectoryEntry>,
 }
 
 
@@ -142,6 +160,7 @@ impl StateDataInner {
 
             // Router Items
             chords: HashMap::new(),
+            directory: Vec::new(), 
         }
     }
 }

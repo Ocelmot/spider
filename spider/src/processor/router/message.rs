@@ -16,5 +16,7 @@ pub enum RouterProcessorMessage {
 
     AddrUpdate(SpiderId2048, String),
 
+    SetNickname(Relation, String),
+
     Upkeep,
 }

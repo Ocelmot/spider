@@ -181,7 +181,8 @@ impl Processor {
                 header: String::from("System"),
                 title: id,
                 inputs: vec![],
-                cb: |_, _, _|{None},
+                cb: |_, _, _, _|{None},
+                data: String::new(),
             };
             self.ui.send(msg).await;
 
@@ -190,9 +191,10 @@ impl Processor {
                 header: String::from("System"),
                 title: String::from("Exit!"),
                 inputs: vec![("button".to_string(), "Exit".to_string())],
-                cb: |idx, title, input|{
+                cb: |idx, title, input, _|{
                     std::process::exit(0);
                 },
+                data: String::new(),
             };
             self.ui.send(msg).await;
 

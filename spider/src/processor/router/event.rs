@@ -68,7 +68,7 @@ impl RouterProcessorState{
 impl RouterProcessorState{
     async fn event_to_subscribers(&mut self, name: &String, from: &Relation, data: &DatasetData) -> HashSet<Relation>{
         let mut recipients = HashSet::new();
-        if let Some(subscriber_set) = self.subscribers.get(name){
+        if let Some(subscriber_set) = self.event_subscribers.get(name){
             for subscriber in subscriber_set{
                 // Check if source is external and dest is external, skip
                 if from.is_peer() && subscriber.is_peer(){

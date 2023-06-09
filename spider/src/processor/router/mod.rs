@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, time::Duration};
 use dht_chord::{chord::ChordHandle, associate::{AssociateRequest, AssociateResponse}, TCPChord};
 use lru::LruCache;
 use spider_link::{
-    message::{Message, RouterMessage},
+    message::{Message, RouterMessage, DirectoryEntry},
     Link, Relation, Role, SpiderId2048,
 };
 use tokio::{
@@ -20,6 +20,7 @@ use super::{message::ProcessorMessage, sender::ProcessorSender, ui::UiProcessorM
 mod event;
 mod chord;
 pub use chord::ChordState;
+mod directory;
 
 mod message;
 pub use message::RouterProcessorMessage;
@@ -61,9 +62,15 @@ pub(crate) struct RouterProcessorState {
     links: HashMap<Relation, Link>,
     pending_links: HashMap<Relation, (Instant, u8, Vec<Message>)>,
 
-    subscribers: HashMap<String, HashSet<Relation>>,
+    // Event items
+    event_subscribers: HashMap<String, HashSet<Relation>>,
 
+    // Chord items
     chords: HashMap<String, ChordEntry>,
+
+    // Directory items
+    directory_subscribers: HashSet<Relation>,
+    directory: HashMap<Relation, DirectoryEntry>,
 }
 
 impl RouterProcessorState {
@@ -82,9 +89,15 @@ impl RouterProcessorState {
             links: HashMap::new(),
             pending_links: HashMap::new(),
 
-            subscribers: HashMap::new(),
+            // Event items
+            event_subscribers: HashMap::new(),
 
+            // Chord items
             chords: HashMap::new(),
+
+            // Directory items
+            directory_subscribers: HashSet::new(),
+            directory: HashMap::new(),
         }
     }
 
@@ -141,7 +154,10 @@ impl RouterProcessorState {
                         }
                     },
 
-                    // add contacts list??!?
+                    RouterProcessorMessage::SetNickname(rel, name) => {
+                        self.set_identity_system(rel, "nickname".into(), name).await;
+                    }
+
                     RouterProcessorMessage::Upkeep => {
                         // should check for disconnected peers, and clean them up
 
@@ -167,6 +183,9 @@ impl RouterProcessorState {
 
                             self.state.put_chord(name, &chord_state).await;
                         }
+
+                        // Save Directory state
+                        self.state.save_directory(&self.directory).await;
                     }
                 }
             }
@@ -175,12 +194,13 @@ impl RouterProcessorState {
     }
 
     async fn init(&mut self){
+        // ===== Setup menu items =====
         // Connect to existing chord
         let msg = UiProcessorMessage::SetSetting {
             header: String::from("Connected Chords"),
             title: String::from("Connect:"),
             inputs: vec![("textentry".to_string(), "Chord Address".to_string())],
-            cb: |idx, name, input|{
+            cb: |idx, name, input, _|{
                 match input{
                     spider_link::message::UiInput::Click => None,
                     spider_link::message::UiInput::Text(addr) => {
@@ -190,6 +210,7 @@ impl RouterProcessorState {
                     },
                 }
             },
+            data: String::new(),
         };
         self.sender.send_ui(msg).await;
 
@@ -198,7 +219,7 @@ impl RouterProcessorState {
             header: String::from("Connected Chords"),
             title: String::from("Host New:"),
             inputs: vec![("textentry".to_string(), "Chord Listen Address".to_string())],
-            cb: |idx, name, input|{
+            cb: |idx, name, input, _|{
                 match input{
                     spider_link::message::UiInput::Click => None,
                     spider_link::message::UiInput::Text(addr) => {
@@ -208,11 +229,15 @@ impl RouterProcessorState {
                     },
                 }
             },
+            data: String::new(),
         };
         self.sender.send_ui(msg).await;
 
         // Initialize chord functions
         self.init_chord_functions().await;
+
+        // Initialize directory functions
+        self.init_directory_functions().await;
 
     }
 
@@ -230,7 +255,7 @@ impl RouterProcessorState {
                 if rel.is_peer(){
                     return; // dont allow subscriptions from peers (at least for now)
                 }
-                let entry = self.subscribers.entry(name);
+                let entry = self.event_subscribers.entry(name);
                 let subscriber_set = entry.or_default();
                 subscriber_set.insert(rel);
             },
@@ -238,16 +263,31 @@ impl RouterProcessorState {
                 if rel.is_peer(){
                     return; // dont allow subscriptions from peers (at least for now)
                 }
-                match self.subscribers.get_mut(&name){
+                match self.event_subscribers.get_mut(&name){
                     Some(subscriber_set) => {
                         subscriber_set.remove(&rel);
                         if subscriber_set.is_empty() {
-                            self.subscribers.remove(&name);
+                            self.event_subscribers.remove(&name);
                         }
                     },
                     None => {}, // there were no subscribers to this message type
                 }
             },
+            RouterMessage::SubscribeDir => {
+                self.handle_subscribe_directory(rel).await;
+            }
+            RouterMessage::UnsubscribeDir => {
+                self.handle_unsubscribe_directory(rel).await;
+            }
+            RouterMessage::AddIdentity(_) => {
+                // base send this, doesnt recieve
+            }
+            RouterMessage::RemoveIdentity(_) => {
+                // base send this, doesnt recieve
+            }
+            RouterMessage::SetIdentityProperty(key, value) => {
+                self.set_identity_self(rel, key, value).await;
+            }
         }
     }
 
@@ -259,6 +299,9 @@ impl RouterProcessorState {
             None => return,
         };
         let relation = link.other_relation().clone();
+
+        // add link relation to directory
+        self.add_identity(relation.clone()).await;
 
         // insert pending link messages into link
         if let Some((_, _, msgs)) = self.pending_links.remove(&relation){

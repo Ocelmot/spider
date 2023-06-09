@@ -24,7 +24,7 @@ tracing-appender = "0.2.2"
 rsa = "0.6.1"
 
 lru = "0.7.8"
-public-ip = "0.2.2"
+phf = { version = "0.11", features = ["macros"] }
 rand = "0.8.5"
 
 regex = "1.8.1"

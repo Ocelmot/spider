@@ -184,7 +184,7 @@ impl RouterProcessorState {
                 ("text".to_string(), status),
                 ("button".to_string(), "Remove".to_string()),
             ],
-            cb: |idx, name, input|{
+            cb: |idx, name, input, _|{
                 match input{
                     spider_link::message::UiInput::Click => {
                         let router_msg = RouterProcessorMessage::LeaveChord(name.to_string());
@@ -194,6 +194,7 @@ impl RouterProcessorState {
                     spider_link::message::UiInput::Text(_) => None,
                 }
             },
+            data: String::new(),
         };
         self.sender.send_ui(msg).await;
 

@@ -57,8 +57,18 @@ struct UiProcessorState {
     dataset_subscriptions: HashMap<AbsoluteDatasetPath, isize>,
 
     // Settings properties
-
-    settings_callbacks: HashMap<String, (HashMap<String, usize>, Vec<(String, fn(u32, &String, UiInput)->Option<ProcessorMessage>)>)>,
+    // This should be converted to a proper struct, which could then manage the boxing of the callback function (TODO)
+    settings_callbacks: HashMap<
+        String, // Header name
+        (
+            HashMap<String, usize>, // Titles -> indices
+            Vec<(
+                String, // Title
+                fn(u32, &String, UiInput, &mut String) -> Option<ProcessorMessage>, // Callback function
+                String, // Data
+            )>
+        )
+    >,
 }
 
 impl UiProcessorState {
@@ -106,8 +116,9 @@ impl UiProcessorState {
                         title,
                         inputs,
                         cb,
+                        data,
                     } => {
-                        self.add_setting(header, title, inputs, cb).await;
+                        self.add_setting(header, title, inputs, cb, data).await;
                     }
                     UiProcessorMessage::RemoveSetting{header, title} => {
                         self.remove_setting(header, title).await;

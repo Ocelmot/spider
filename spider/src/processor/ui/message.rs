@@ -12,7 +12,9 @@ pub enum UiProcessorMessage {
         header: String,
         title: String,
         inputs: Vec<(String, String)>,
-        cb: fn(u32, &String, UiInput)->Option<ProcessorMessage>
+        cb: fn(u32, &String, UiInput, &mut String)->Option<ProcessorMessage>,
+        // cb: Box<dyn FnMut(u32, &String, UiInput)->Option<ProcessorMessage>>
+        data: String,
     },
     RemoveSetting {
         header: String,
@@ -39,12 +41,14 @@ impl std::fmt::Debug for UiProcessorMessage {
                 title,
                 inputs,
                 cb,
+                data,
             } => f
                 .debug_struct("SetSetting")
                 .field("header", header)
                 .field("title", title)
                 .field("inputs", inputs)
                 .field("cb", &"<redacted impl>")
+                .field("data", data)
                 .finish(),
             Self::RemoveSetting {
                 header,

@@ -21,6 +21,9 @@ impl<const BYTE_SIZE: usize> SpiderId<BYTE_SIZE>{
 			bytes
 		}
 	}
+    pub fn to_bytes(self) -> [u8; BYTE_SIZE]{
+        self.bytes
+    }
 
 	pub fn as_big_uint(&self)-> BigUint{
 		BigUint::from_bytes_be(&self.bytes)

@@ -25,7 +25,7 @@ impl UiProcessorState {
         mgr.get_changes(); // flush changes, since this will occur before UIs are connected, dont have to send anywhere.
     }
 
-    pub(crate) async fn add_setting(&mut self, header: String, title: String, inputs: Vec<(String, String)>, cb: fn(u32, &String, UiInput)->Option<ProcessorMessage>) {
+    pub(crate) async fn add_setting(&mut self, header: String, title: String, inputs: Vec<(String, String)>, cb: fn(u32, &String, UiInput, &mut String)->Option<ProcessorMessage>, data: String) {
         let id = self.state.self_id().await;
 
         // find header
@@ -134,7 +134,7 @@ impl UiProcessorState {
                 match title_map.get(&title){
                     Some(index) => {
                         // Index exists, update existing
-                        list[*index] = (title.clone(), cb);
+                        list[*index] = (title.clone(), cb, data);
 
                         // update dataset item
                         let dataset_message = DatasetMessage::SetElement { path: dataset_path, data: data_item, id: *index };
@@ -144,7 +144,7 @@ impl UiProcessorState {
                     None => {
                         // Index does not exist, push to back
                         title_map.insert(title.clone(), list.len());
-                        list.push((title.clone(), cb));
+                        list.push((title.clone(), cb, data));
 
                         // Insert dataset item
                         self.sender.send_dataset(DatasetProcessorMessage::PublicMessage(rel, DatasetMessage::Append { path: dataset_path, data: data_item })).await;
@@ -153,8 +153,9 @@ impl UiProcessorState {
             },
             None => {
                 // save callback
-                let title_map = HashMap::new();
-                let list = vec![(title.clone(), cb)];
+                let mut title_map = HashMap::new();
+                title_map.insert(title.clone(), 0); // initial entry is always at 0
+                let list = vec![(title.clone(), cb, data)];
                 self.settings_callbacks.insert(header, (title_map, list));
 
                 // Insert dataset item
@@ -209,8 +210,8 @@ impl UiProcessorState {
             Some((x, list)) => {
                 let func_index = dataset_ids.last().unwrap(); // get innermost dataset id
                 match list.get_mut(*func_index) {
-                    Some((title, func)) => {
-                        let msg = func(input_index, title, input);
+                    Some((title, func, data)) => {
+                        let msg = func(input_index, title, input, data);
                         match msg{
                             Some(msg) => {
                                 self.sender.send(msg).await;

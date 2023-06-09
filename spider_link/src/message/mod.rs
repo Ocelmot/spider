@@ -32,6 +32,12 @@ pub use dataset::{
     DatasetData,
 };
 
+mod router;
+pub use router::{
+    RouterMessage,
+    DirectoryEntry,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Frame {
     pub data: Vec<u8>,
@@ -48,12 +54,4 @@ pub enum Message {
     Ui(UiMessage),
     Dataset(DatasetMessage),
     Router(RouterMessage),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RouterMessage {
-    SendEvent(String, Vec<Relation>, DatasetData),
-    Event(String, Relation, DatasetData),
-    Subscribe(String),
-    Unsubscribe(String),
 }

@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose, Engine};
 use rsa::{
     pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey},
     RsaPrivateKey,
@@ -40,6 +41,37 @@ impl Relation{
             true
         }else{
             false
+        }
+    }
+
+    pub fn to_base64(&self) -> String {
+        let role: u8 = match self.role {
+            Role::Peripheral => 1,
+            Role::Peer => 0,
+        };
+        let mut bytes = self.id.clone().to_bytes().to_vec();
+        bytes.push(role);
+        general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    }
+    pub fn from_base64(s: String) -> Option<Self> {
+        match general_purpose::URL_SAFE_NO_PAD.decode(s){
+            Ok(mut v) => {
+                let role = match v.pop()? {
+                    0 => Role::Peer,
+                    1 => Role::Peripheral,
+                    _ => return None,
+                };
+                let bytes= match v.try_into() {
+                    Ok(bytes) => bytes,
+                    Err(_) => return None,
+                };
+                let id = SpiderId2048::from_bytes(bytes);
+                Some(Self {
+                    role,
+                    id
+                })
+            },
+            Err(_) => None,
         }
     }
 
