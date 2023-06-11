@@ -76,6 +76,13 @@ impl StateData {
     }
 
     // Router Items
+    pub async fn name(&self) -> MappedMutexGuard<'_, String>{
+        let inner = self.inner.lock().await;
+        // inner.name.as_ref().unwrap_or(&String::from("No Name"))
+        MutexGuard::map(inner, |i|{
+            i.name.get_or_insert(String::from("NoName"))
+        })
+    }
     pub async fn chord_names(&self) -> Vec<String>{
         let inner = self.inner.lock().await;
         inner.chords.keys().cloned().collect()
@@ -144,6 +151,8 @@ struct StateDataInner{
     // Router Items
     /// Map from chord names to listen_adder, pub_addr, and vectors of recent addresses
     #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
     chords: HashMap<String, (String, String, String, Vec<String>)>,
     #[serde(default)]
     directory: Vec<DirectoryEntry>,
@@ -159,6 +168,7 @@ impl StateDataInner {
             peripheral_services: HashMap::new(),
 
             // Router Items
+            name: None,
             chords: HashMap::new(),
             directory: Vec::new(), 
         }

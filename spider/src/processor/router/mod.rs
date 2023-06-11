@@ -154,6 +154,39 @@ impl RouterProcessorState {
                         }
                     },
 
+                    RouterProcessorMessage::SetName(name) => {
+                        // save new name
+                        let mut state_name = self.state.name().await;
+                        *state_name = name.clone();
+                        drop(state_name);
+                        // update setting
+                        let msg = UiProcessorMessage::SetSetting {
+                            header: String::from("System"),
+                            title: "Name:".into(),
+                            inputs: vec![
+                                ("text".to_string(), name.clone()),
+                                ("textentry".to_string(), "New Name".into())
+                            ],
+                            cb: |idx, name, input, _|{
+                                match input{
+                                    spider_link::message::UiInput::Click => None,
+                                    spider_link::message::UiInput::Text(name) => {
+                                        let router_msg = RouterProcessorMessage::SetName(name);
+                                        let msg = ProcessorMessage::RouterMessage(router_msg);
+                                        Some(msg)
+                                    },
+                                }
+                            },
+                            data: String::new(),
+                        };
+                        self.sender.send_ui(msg).await;
+                        // message name on existing channels
+                        for (_, link) in &self.links{
+                            let msg = RouterMessage::SetIdentityProperty("name".into(), name.clone());
+                            let msg = Message::Router(msg);
+                            link.send(msg).await;
+                        }
+                    }
                     RouterProcessorMessage::SetNickname(rel, name) => {
                         self.set_identity_system(rel, "nickname".into(), name).await;
                     }
@@ -195,6 +228,30 @@ impl RouterProcessorState {
 
     async fn init(&mut self){
         // ===== Setup menu items =====
+        // Change/Set name
+        let name = self.state.name().await;
+        let msg = UiProcessorMessage::SetSetting {
+            header: String::from("System"),
+            title: "Name:".into(),
+            inputs: vec![
+                ("text".to_string(), name.clone()),
+                ("textentry".to_string(), "New Name".into())
+            ],
+            cb: |idx, name, input, _|{
+                match input{
+                    spider_link::message::UiInput::Click => None,
+                    spider_link::message::UiInput::Text(name) => {
+                        let router_msg = RouterProcessorMessage::SetName(name);
+                        let msg = ProcessorMessage::RouterMessage(router_msg);
+                        Some(msg)
+                    },
+                }
+            },
+            data: String::new(),
+        };
+        self.sender.send_ui(msg).await;
+        drop(name);
+
         // Connect to existing chord
         let msg = UiProcessorMessage::SetSetting {
             header: String::from("Connected Chords"),
@@ -299,6 +356,13 @@ impl RouterProcessorState {
             None => return,
         };
         let relation = link.other_relation().clone();
+
+        // Send name
+        let name = self.state.name().await;
+        let msg = RouterMessage::SetIdentityProperty("name".into(), name.clone());
+        drop(name);
+        let msg = Message::Router(msg);
+        link.send(msg).await;
 
         // add link relation to directory
         self.add_identity(relation.clone()).await;
