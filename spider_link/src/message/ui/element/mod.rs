@@ -261,6 +261,14 @@ impl UiElement {
         };
         self.insert_child(index, child);
     }
+    pub fn delete_child(&mut self, index: usize){
+        match &mut self.children {
+            Some(children) => {
+                children.remove(index);
+            },
+            None => {}, // no children to delete
+        }
+    }
 
     // Change management operations
     pub fn take_changes(&mut self) -> UiElementChangeSet{

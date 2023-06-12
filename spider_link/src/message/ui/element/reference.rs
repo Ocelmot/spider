@@ -56,6 +56,12 @@ impl<'a> UiElementRef<'a>{
         self.element.changes.root().add_operation(UiChildOperations::Insert(index, child.clone()));
         self.element.insert_child(index, child);
     }
+
+    pub fn delete_child(&mut self, index: usize) {
+        self.element.changes.root().add_operation(UiChildOperations::Delete(index));
+        self.element.delete_child(index);
+    }
+
 }
 
 impl Deref for UiElementRef<'_>{

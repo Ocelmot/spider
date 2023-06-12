@@ -195,7 +195,7 @@ impl DatasetProcessorState {
                 let mut dataset = parse_dataset(&file_path).await;
                 // make change
                 // pad
-                for _ in dataset.len()..id {
+                for _ in dataset.len()..=id {
                     dataset.push(DatasetData::Null);
                 }
                 // set elem
@@ -303,6 +303,7 @@ impl DatasetProcessorState {
         for item in path.parts() {
             p.push(item);
         }
+        p.set_extension("dat");
         p
     }
 }

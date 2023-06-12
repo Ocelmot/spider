@@ -97,6 +97,16 @@ impl Relation{
             None => None,
         }
     }
+
+    pub fn sha256(&self) -> String{
+        let role: u8 = match self.role {
+            Role::Peripheral => 1,
+            Role::Peer => 0,
+        };
+        let mut bytes = self.id.clone().to_bytes().to_vec();
+        bytes.push(role);
+        sha256::digest(bytes.as_slice())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
