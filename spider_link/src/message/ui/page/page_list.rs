@@ -58,6 +58,10 @@ impl UiPageList{
 		}
 	}
 
+	pub fn get_page(&self, id: &SpiderId2048) -> Option<&UiPageManager>{
+		self.pages.get(&id)
+	}
+
 	pub fn get_page_mut(&mut self, id: &SpiderId2048) -> Option<&mut UiPageManager>{
 		self.pages.get_mut(&id)
 	}

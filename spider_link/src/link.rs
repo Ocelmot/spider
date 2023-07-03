@@ -116,7 +116,6 @@ impl Link{
 	pub fn take_recv(&mut self) -> Option<Receiver<Message>>{
 		self.in_rx.take()
 	}
-
 }
 
 

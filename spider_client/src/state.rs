@@ -35,7 +35,7 @@ impl SpiderClientState {
             chord_list: Vec::new(),
             
             connection_attempts: 0,
-            auto_reconnect: true,
+            auto_reconnect: false,
         }
     }
 

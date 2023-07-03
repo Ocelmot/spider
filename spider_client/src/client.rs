@@ -81,6 +81,12 @@ impl SpiderClient {
         
     }
 
+    pub async fn disconnect(&mut self){
+        if let Some(link) = self.link.take() {
+            drop(link);
+        }
+    }
+
     async fn find_address(&self, strat: &AddressStrategy) -> Option<String> {
         match strat{
             AddressStrategy::Localhost => Some(String::from("localhost")),
