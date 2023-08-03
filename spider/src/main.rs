@@ -13,7 +13,7 @@ mod state_data;
 use state_data::StateData;
 
 mod processor;
-use crate::processor::{ProcessorBuilder};
+use crate::processor::ProcessorBuilder;
 
 
 #[tokio::main]
@@ -22,10 +22,10 @@ async fn main() -> Result<(), io::Error> {
 	// filename is name of config file, defaults to config.json
 
 	// setup tokio debugger
-	// console_subscriber::ConsoleLayer::builder()
-    //     .retention(Duration::from_secs(60))
-    //     .server_addr(([127, 0, 0, 1], 6669))
-    //     .init();
+	console_subscriber::ConsoleLayer::builder()
+        .retention(Duration::from_secs(600))
+        .server_addr(([127, 0, 0, 1], 6669))
+        .init();
 
 	// load config file
 	let config = load_config();

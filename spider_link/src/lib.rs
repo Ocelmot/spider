@@ -1,10 +1,12 @@
+use std::sync::Arc;
+
 use base64::{engine::general_purpose, Engine};
 use rsa::{
     pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey},
     RsaPrivateKey,
 };
 use serde::{Deserialize, Serialize};
-use tokio::{net::ToSocketAddrs, sync::mpsc::Receiver};
+use tokio::{net::ToSocketAddrs, sync::{mpsc::Receiver, Mutex}};
 
 pub mod link;
 pub mod message;
@@ -145,7 +147,7 @@ impl SelfRelation {
         Link::connect(self.clone(), addr, relation).await
     }
     // listener: to generate new connections
-    pub fn listen<A: ToSocketAddrs + Send + 'static>(&self, addr: A) -> Receiver<Link> {
+    pub fn listen<A: ToSocketAddrs + Send + 'static>(&self, addr: A) -> (Receiver<Link>, Arc<Mutex<Option<String>>>) {
         Link::listen(self.clone(), addr)
     }
 }

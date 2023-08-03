@@ -196,7 +196,7 @@ async fn wrap_child_stdio(child: &mut Child, stdio_dir: &Path) {
     let mut stdout_file = File::create(stdio_dir.join("stdout")).await.expect("file can be created");
     let mut stderr = child.stderr.take().expect("should have handle");
     let mut stderr_file = File::create(stdio_dir.join("stderr")).await.expect("file can be created");
-    let file_max_len = 16000;
+    let file_max_len = 16000000;
     let child_handle = tokio::spawn(async move {
         loop{
             let mut outbuf = Vec::new();
@@ -205,6 +205,9 @@ async fn wrap_child_stdio(child: &mut Child, stdio_dir: &Path) {
                 out = stdout.read_buf(&mut outbuf) =>{
                     match out{
                         Ok(count) => {
+                            if count == 0{
+                                break;
+                            }
                             // write to file, if file would be too long rotate it
                             stdout_file.write(&outbuf[..count]).await;
                             let file_len = stdout_file.metadata().await.unwrap().len();
@@ -230,6 +233,9 @@ async fn wrap_child_stdio(child: &mut Child, stdio_dir: &Path) {
                 err = stderr.read_buf(&mut errbuf) =>{
                     match err{
                         Ok(count) => {
+                            if count == 0{
+                                break;
+                            }
                             // write to file, if file would be too long rotate it
                             stderr_file.write(&errbuf[..count]).await;
                             let file_len = stderr_file.metadata().await.unwrap().len();

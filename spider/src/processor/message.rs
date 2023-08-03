@@ -1,13 +1,17 @@
-
-
 use spider_link::{message::Message, Relation};
 
-
-use super::{ui::UiProcessorMessage, router::RouterProcessorMessage, dataset::DatasetProcessorMessage, peripherals::PeripheralProcessorMessage};
+use super::{
+    dataset::DatasetProcessorMessage,
+    listener::ListenProcessorMessage,
+    peripherals::PeripheralProcessorMessage,
+    router::RouterProcessorMessage,
+    ui::UiProcessorMessage,
+};
 
 #[derive(Debug)]
-pub enum ProcessorMessage{
+pub enum ProcessorMessage {
     RemoteMessage(Relation, Message),
+    ListenerMessage(ListenProcessorMessage),
     RouterMessage(RouterProcessorMessage),
     UiMessage(UiProcessorMessage),
     DatasetMessage(DatasetProcessorMessage),

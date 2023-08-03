@@ -15,7 +15,7 @@ mod sender;
 use sender::ProcessorSender;
 
 mod listener;
-use listener::Listener;
+use listener::ListenerProcessor;
 
 mod router;
 use router::RouterProcessor;
@@ -34,6 +34,7 @@ mod dataset;
 use dataset::DatasetProcessor;
 
 use self::dataset::DatasetProcessorMessage;
+use self::listener::ListenProcessorMessage;
 use self::peripherals::PeripheralProcessorMessage;
 use self::router::RouterProcessorMessage;
 
@@ -102,7 +103,7 @@ struct Processor {
     sender: ProcessorSender,
     receiver: Receiver<ProcessorMessage>,
 
-    listener: Listener,
+    listener: ListenerProcessor,
     router: RouterProcessor,
     peripherals: PeripheralsProcessor,
     ui: UiProcessor,
@@ -120,7 +121,7 @@ impl Processor {
         let sender = ProcessorSender::new(sender);
 
         // start listener
-        let listener = Listener::new(config.clone(), state.clone(), sender.clone());
+        let listener = ListenerProcessor::new(config.clone(), state.clone(), sender.clone());
 
         // start router
         let router = RouterProcessor::new(config.clone(), state.clone(), sender.clone());
@@ -229,9 +230,13 @@ impl Processor {
                                 self.router
                                     .send(RouterProcessorMessage::PeripheralMessage(relation, msg))
                                     .await;
-                            }
+                            },
+                            Message::Error(_) => { },
                         }
                     }
+                    ProcessorMessage::ListenerMessage(msg) => {
+                        self.listener.send(msg).await;
+                    },
                     ProcessorMessage::RouterMessage(msg) => {
                         self.router.send(msg).await;
                     }
@@ -247,6 +252,7 @@ impl Processor {
                     }
 
                     ProcessorMessage::Upkeep => {
+                        self.listener.send(ListenProcessorMessage::Upkeep).await;
                         self.ui.send(UiProcessorMessage::Upkeep).await;
                         self.dataset_processor.send(DatasetProcessorMessage::Upkeep).await;
                         self.router.send(RouterProcessorMessage::Upkeep).await;

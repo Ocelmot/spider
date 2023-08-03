@@ -1,5 +1,5 @@
 
-use std::{io::ErrorKind, future::Future};
+use std::{io::ErrorKind, sync::Arc};
 
 use chacha20poly1305::{Key, Nonce, ChaCha20Poly1305, KeyInit, aead::{OsRng, Aead}};
 use rand::RngCore;
@@ -11,17 +11,17 @@ use tokio::{
 		TcpStream,
 		TcpListener
 	},
-	sync::mpsc::{
+	sync::{mpsc::{
 		channel,
 		Sender,
-		Receiver
-	},
+		Receiver, error::SendError
+	}, Mutex},
 	select,
 	io::{AsyncReadExt, AsyncWriteExt}
 };
 use tracing::{error, info};
 
-use crate::{message::{Frame, Message, Protocol}, SelfRelation, Relation};
+use crate::{message::{Frame, Message, Protocol, KeyRequest}, SelfRelation, Relation};
 #[derive(Debug)]
 pub struct Link{
 	own_relation: SelfRelation,
@@ -43,7 +43,7 @@ impl Link{
 			lb.send_introduction().await;
 			// println!("connect sent introduction");
 			// println!("connect reading stream config");
-			lb.read_stream_config().await;
+			lb.read_stream_config(&None).await;
 			// println!("connect read stream config");
 			// println!("connect reading introduction");
 			lb.read_introduction().await;
@@ -55,8 +55,11 @@ impl Link{
 	}
 
 	// Listener:
-	pub fn listen<A: ToSocketAddrs + Send + 'static>(own_relation: SelfRelation, listen_addr: A) -> Receiver<Link>{
+	pub fn listen<A: ToSocketAddrs + Send + 'static>(own_relation: SelfRelation, listen_addr: A) -> (Receiver<Link>, Arc<Mutex<Option<String>>>)
+		{
 		let (tx, rx) = channel(50);
+		let kr: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+		let kr_ret = kr.clone();
 		// listen for connections,
 		tokio::spawn(async move{
 			let listener = TcpListener::bind(listen_addr).await.expect("failed to start Link listener");
@@ -69,10 +72,14 @@ impl Link{
 
 				let local_tx = tx.clone();
 				let local_own_relation = own_relation.clone();
+				let local_kr = kr.clone();
 				tokio::spawn(async move{
 					let mut lb = LinkBuilder::from_stream(local_own_relation, stream);
 					// println!("listen reading stream config");
-					lb.read_stream_config().await;
+					let done = lb.read_stream_config(&&local_kr.lock().await).await;
+					if done {
+						return;
+					}
 					// println!("listen read stream config");
 					// println!("listen reading introduction");
 					lb.read_introduction().await;
@@ -91,7 +98,22 @@ impl Link{
 			}
 			
 		});
-		rx
+		(rx, kr_ret)
+	}
+
+	pub async fn key_request<A: ToSocketAddrs + Send + 'static>(addr: A) -> Option<KeyRequest>{
+		let mut sock = match TcpStream::connect(addr).await {
+			Ok(sock) => sock,
+			Err(_) => return None,
+		};
+		let frame = Frame{ data: b"KEY_REQUEST".to_vec() };
+		let send_buf = serde_json::to_vec(&frame).expect("frame should serialize");
+		sock.write(&send_buf).await;
+		let mut buf = String::new();
+		sock.read_to_string(&mut buf).await;
+		let frame = serde_json::de::from_str::<Frame>(&buf).ok()?;
+		let key = serde_json::de::from_slice::<KeyRequest>(&frame.data);
+		key.ok()
 	}
 
 	pub fn own_relation(&self) -> &SelfRelation{
@@ -102,8 +124,8 @@ impl Link{
 		&self.other_relation
 	}
 
-	pub async fn send(&self, msg: Message){
-		self.out_tx.send(msg).await;
+	pub async fn send(&self, msg: Message) -> Result<(), SendError<Message>>{
+		self.out_tx.send(msg).await
 	}
 
 	pub async fn recv(&mut self) -> Option<Message>{
@@ -181,15 +203,27 @@ impl LinkBuilder{
 		// println!("sent stream config");
 	}
 
-	async fn read_stream_config(&mut self){
+	async fn read_stream_config(&mut self, enable_key_request: &Option<String>) -> bool{
 		//println!("reading stream config");
 		let enc_data = if let Some(enc_data) = self.read_frame().await {
 			enc_data
 		} else {
 			self.stream.shutdown().await;
-			return;
+			return true;
 		};
 		
+		// if key is requested and enabled, respond with that instead.
+		// Then, quit.
+		if enc_data == b"KEY_REQUEST"{
+			match enable_key_request {
+				Some(name) => {
+					self.respond_key_request(name.clone()).await;
+				},
+				None => {},
+			}
+			self.stream.shutdown().await;
+			return true;
+		}
 
 		let dec_data = { // ensure that encryption items are not held across await
 			// decrypt data with our key
@@ -201,8 +235,17 @@ impl LinkBuilder{
 		self.other_key = Some(stream_key);
 		self.other_nonce = Some(stream_nonce);
 		// println!("saved stream config");
+		return false;
 	}
 
+	async fn respond_key_request(&mut self, name: String) {
+		let request = KeyRequest{
+			key: self.own_relation.relation.id.clone(),
+			name
+		};
+		let data = serde_json::ser::to_vec(&request).expect("request should serialize");
+		self.write_frame(data).await;
+	}
 
 	async fn send_introduction(&mut self){
 		//println!("sending introduction");

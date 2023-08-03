@@ -44,6 +44,12 @@ pub(crate) struct Frame {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyRequest{
+    pub key: SpiderId2048,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Protocol {
     Introduction { id: SpiderId2048, role: Role },
     Message(Message),
@@ -54,4 +60,5 @@ pub enum Message {
     Ui(UiMessage),
     Dataset(DatasetMessage),
     Router(RouterMessage),
+    Error(String),
 }

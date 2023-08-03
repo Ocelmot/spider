@@ -15,7 +15,7 @@ use crate::{config::SpiderConfig, state_data::StateData};
 
 use self::chord::ChordEntry;
 
-use super::{message::ProcessorMessage, sender::ProcessorSender, ui::UiProcessorMessage};
+use super::{message::ProcessorMessage, sender::ProcessorSender, ui::UiProcessorMessage, listener::ListenProcessorMessage};
 
 mod event;
 mod chord;
@@ -67,10 +67,13 @@ pub(crate) struct RouterProcessorState {
 
     // Chord items
     chords: HashMap<String, ChordEntry>,
+    chord_subscribers: HashMap<Relation, usize>,
+    chord_addrs: LruCache<String, ()>,
 
     // Directory items
     directory_subscribers: HashSet<Relation>,
     directory: HashMap<Relation, DirectoryEntry>,
+
 }
 
 impl RouterProcessorState {
@@ -94,6 +97,8 @@ impl RouterProcessorState {
 
             // Chord items
             chords: HashMap::new(),
+            chord_subscribers: HashMap::new(),
+            chord_addrs: LruCache::new(500),
 
             // Directory items
             directory_subscribers: HashSet::new(),
@@ -159,6 +164,10 @@ impl RouterProcessorState {
                         let mut state_name = self.state.name().await;
                         *state_name = name.clone();
                         drop(state_name);
+                        // inform listener
+                        let msg = ListenProcessorMessage::SetKeyRequest(Some(name.clone()));
+                        let msg = ProcessorMessage::ListenerMessage(msg);
+                        self.sender.send(msg).await;
                         // update setting
                         let msg = UiProcessorMessage::SetSetting {
                             header: String::from("System"),
@@ -212,10 +221,25 @@ impl RouterProcessorState {
                                 },
                             };
                             let chord_state = chord_entry.get_state_mut();
-                            chord_state.add_addrs(peer_addrs);
+                            chord_state.add_addrs(peer_addrs.clone());
+
+                            for peer_addr in peer_addrs {
+                                self.chord_addrs.push(peer_addr, ());
+                            }
 
                             self.state.put_chord(name, &chord_state).await;
                         }
+                        // Handle chord address subscriptions
+                        let mut messages = Vec::with_capacity(self.chord_subscribers.len());
+                        for (rel, limit) in &self.chord_subscribers{
+                            let x: Vec<String> = self.chord_addrs.iter().take(*limit).map(|(x, _)|{x.clone()}).collect();
+                            let msg = Message::Router(RouterMessage::ChordAddrs(x));
+                            messages.push((rel.clone(), msg));
+                        }
+                        for (rel, msg) in messages {
+                            self.send_msg(rel, msg).await;
+                        }
+                        
 
                         // Save Directory state
                         self.state.save_directory(&self.directory).await;
@@ -300,6 +324,8 @@ impl RouterProcessorState {
 
     async fn process_remote_message(&mut self, rel: Relation, msg: RouterMessage) {
         match msg {
+
+            // Event Messages
             RouterMessage::SendEvent(name, externals, data) => {
                 self.handle_send_event(rel.clone(), name, externals, data).await;
             },
@@ -330,6 +356,8 @@ impl RouterProcessorState {
                     None => {}, // there were no subscribers to this message type
                 }
             },
+
+            // Directory Messages
             RouterMessage::SubscribeDir => {
                 self.handle_subscribe_directory(rel).await;
             }
@@ -344,6 +372,20 @@ impl RouterProcessorState {
             }
             RouterMessage::SetIdentityProperty(key, value) => {
                 self.set_identity_self(rel, key, value).await;
+            }
+
+            // Chord Connected Messages
+            RouterMessage::SubscribeChord(limit) => {
+                self.chord_subscribers.insert(rel.clone(), limit);
+                let x: Vec<String> = self.chord_addrs.iter().take(limit).map(|(x, _)|{x.clone()}).collect();
+                let msg = Message::Router(RouterMessage::ChordAddrs(x));
+                self.send_msg(rel, msg).await;
+            }
+            RouterMessage::UnsubscribeChord => {
+                self.chord_subscribers.remove(&rel);
+            }
+            RouterMessage::ChordAddrs(..) => {
+                // base sends this, doesnt recieve
             }
         }
     }

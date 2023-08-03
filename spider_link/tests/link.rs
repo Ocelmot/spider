@@ -24,7 +24,7 @@ async fn send_message(){
     let priv_key = RsaPrivateKey::new(&mut rng, 2048).expect("failed to generate key");
     let role = Role::Peer;
     let base_relation = SelfRelation::from_key(priv_key, role);
-    let mut listener = Link::listen(base_relation.clone(), "0.0.0.0:1930");
+    let (mut listener, _) = Link::listen(base_relation.clone(), "0.0.0.0:1930");
 
     // setup peripheral link
     let peripheral_key = RsaPrivateKey::new(&mut rng, 2048).expect("failed to generate key");

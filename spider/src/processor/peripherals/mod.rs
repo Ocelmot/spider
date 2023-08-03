@@ -90,6 +90,7 @@ impl PeripheralProcessorState{
                     Some(msg) => msg,
                     None => break,
                 };
+                println!("Peripheral message: {:?}", msg);
 
                 match msg {                    
                     PeripheralProcessorMessage::Install(addr) => self.install_service(addr).await,

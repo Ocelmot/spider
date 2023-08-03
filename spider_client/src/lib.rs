@@ -1,24 +1,10 @@
-
-
-
 pub use spider_link::{
-	message,
-	SpiderId2048,
-	SelfRelation,
-	Role,
-	Relation,
+    beacon::{beacon_lookout_many, beacon_lookout_one},
+    message, Link, Relation, Role, SelfRelation, SpiderId2048,
 };
 
 mod client;
-pub use client::SpiderClient;
+pub use client::{ClientChannel, ClientResponse, SpiderClientBuilder};
 
 mod state;
 use state::SpiderClientState;
-
-pub use state::AddressStrategy;
-
-
-
-
-
-

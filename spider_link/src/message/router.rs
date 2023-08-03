@@ -22,6 +22,11 @@ pub enum RouterMessage {
     AddIdentity(DirectoryEntry),
     RemoveIdentity(Relation),
     SetIdentityProperty(String, String),
+
+    // Chord messages
+    SubscribeChord(usize),
+    UnsubscribeChord,
+    ChordAddrs(Vec<String>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
