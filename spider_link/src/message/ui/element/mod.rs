@@ -54,6 +54,7 @@ pub enum UiElementKind {
     Grid(u8, u8),
 
     // Output
+    Header,
     Text,
 
     // Input
@@ -72,6 +73,7 @@ impl UiElementKind{
             UiElementKind::Columns => false,
             UiElementKind::Rows => false,
             UiElementKind::Grid(_, _) => false,
+            UiElementKind::Header => false,
             UiElementKind::Text => false,
             UiElementKind::TextEntry => true,
             UiElementKind::Button => true,
@@ -91,6 +93,7 @@ impl UiElementKind{
                         "columns" => UiElementKind::Columns,
                         "rows" => UiElementKind::Rows,
 
+                        "header" => UiElementKind::Header,
                         "text" => UiElementKind::Text,
                         "textentry" => UiElementKind::TextEntry,
                         "button" => UiElementKind::Button,

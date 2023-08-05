@@ -258,7 +258,7 @@ async fn wrap_child_stdio(child: &mut Child, stdio_dir: &Path) {
                         Err(_) => {break;},
                     }
                 }
-            }        
+            }
         }
     });
 }

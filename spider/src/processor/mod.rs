@@ -117,7 +117,7 @@ struct Processor {
 impl Processor {
     fn new(config: SpiderConfig, state: StateData) -> Self {
         // create channel
-        let (sender, receiver) = channel(50);
+        let (sender, receiver) = channel(500);
         let sender = ProcessorSender::new(sender);
 
         // start listener

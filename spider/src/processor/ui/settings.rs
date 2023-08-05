@@ -42,7 +42,11 @@ impl UiProcessorState {
                 let mut elem = UiElement::new(UiElementKind::Rows);
                 elem.set_id(header.clone());
 
-                elem.append_child(UiElement::from_string(header.clone()));
+                elem.append_child({
+                    let mut header = UiElement::from_string(header.clone());
+                    header.set_kind(UiElementKind::Header);
+                    header
+                });
                 elem.append_child({
                     // list of settings, matches to a dataset
                     let mut settings_list_element = UiElement::new(UiElementKind::Rows);
