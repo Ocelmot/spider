@@ -111,6 +111,9 @@ impl UiProcessorState {
                         let msg = UiMessage::Dataset(path, dataset);
                         self.ui_to_subscribers(msg).await;
                     }
+                    UiProcessorMessage::SetSettingHeader { header } => {
+                        self.set_setting_header_handler(&header).await;
+                    }
                     UiProcessorMessage::SetSetting {
                         header,
                         title,

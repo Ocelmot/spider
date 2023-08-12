@@ -6,7 +6,13 @@ use spider_link::{
 #[derive(Debug)]
 pub enum RouterProcessorMessage {
     PeripheralMessage(Relation, RouterMessage),
+    
     NewLink(Link),
+    SetApprovalCode(String),
+    ApproveLink(String),
+    DenyLink(String),
+    ApprovedLink(Link),
+
     SendMessage(Relation, Message),
     MulticastMessage(Vec<Relation>, Message),
 
@@ -18,6 +24,7 @@ pub enum RouterProcessorMessage {
 
     SetName(String),
     SetNickname(Relation, String),
+    ClearDirectoryEntry(Relation),
 
     Upkeep,
 }

@@ -8,7 +8,8 @@ use super::{RouterProcessorState, RouterProcessorMessage};
 
 
 static SYSTEM_PROPERTIES: Set<&'static str> = phf_set! {
-    "nickname"
+    "nickname",
+    "blocked"
 };
 
 static SELF_PROPERTIES: Set<&'static str> = phf_set! {
@@ -41,6 +42,16 @@ impl RouterProcessorState{
     pub(crate) async fn handle_unsubscribe_directory(&mut self, rel: Relation){
         self.directory_subscribers.remove(&rel);
     }
+
+    pub(crate) async fn clear_directory_entry_handler(&mut self, rel: Relation) {
+        // remove from directory
+        self.remove_identity(&rel).await;
+
+        // cancel existing connection
+        if let Some(link) = self.links.remove(&rel){
+            link.terminate().await;
+        }
+    }
 }
 
 // Operation functions
@@ -49,6 +60,7 @@ impl RouterProcessorState{
         if !self.directory.contains_key(&rel) {
             let new_entry = DirectoryEntry::new(rel.clone());
             self.directory.insert(rel.clone(), new_entry.clone());
+            self.state.save_directory(&self.directory).await;
 
             let msg = RouterMessage::AddIdentity(new_entry.clone());
             self.message_dir_subscribers(msg).await;
@@ -114,8 +126,8 @@ impl RouterProcessorState{
         self.set_directory_setting(updated_entry).await;
     }
 
-    pub(crate) async fn remove_identity(&mut self, rel: Relation){
-        if let None = self.directory.remove(&rel){
+    pub(crate) async fn remove_identity(&mut self, rel: &Relation){
+        if let None = self.directory.remove(rel){
             return; // if there was no value, dont update listeners
         }
 
@@ -162,21 +174,28 @@ impl RouterProcessorState{
             },
             None => String::new(),
         };
+        let label = format!("{} {}", nickname, name);
         
 
         let msg = UiProcessorMessage::SetSetting {
             header: "Directory".into(),
             title,
             inputs: vec![
-                ("text".into(), nickname),
-                ("text".into(), name),
+                ("text".into(), label),
                 ("textentry".into(), "Rename".into()),
+                ("button".into(), "Remove".into()),
             ],
             cb: |idx, name, input, data|{
                 let rel = serde_json::from_str(data).unwrap();
                 match input{
-                    spider_link::message::UiInput::Click => None,
+                    spider_link::message::UiInput::Click => {
+                        // only button will send click
+                        let router_msg = RouterProcessorMessage::ClearDirectoryEntry(rel);
+                        let msg = ProcessorMessage::RouterMessage(router_msg);
+                        Some(msg)
+                    },
                     spider_link::message::UiInput::Text(name) => {
+                        // only textentry will send text
                         let router_msg = RouterProcessorMessage::SetNickname(rel, name);
                         let msg = ProcessorMessage::RouterMessage(router_msg);
                         Some(msg)

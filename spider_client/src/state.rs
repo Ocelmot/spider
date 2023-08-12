@@ -10,6 +10,8 @@ pub(crate) struct SpiderClientState{
     // Identity
     pub self_relation: SelfRelation,
     pub host_relation: Option<Relation>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub permission_code: Option<String>,
 
     // Config
     pub auto_reconnect: bool,
@@ -43,6 +45,7 @@ impl SpiderClientState {
             // Identity
             self_relation: SelfRelation::generate_key(Role::Peripheral),
             host_relation: None,
+            permission_code: None,
 
             // Config
             auto_reconnect: false,

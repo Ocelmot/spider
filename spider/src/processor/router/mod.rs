@@ -13,10 +13,11 @@ use tokio::{
 
 use crate::{config::SpiderConfig, state_data::StateData};
 
-use self::chord::ChordEntry;
+use self::{chord::ChordEntry, authorization::PendingLinkControl};
 
 use super::{message::ProcessorMessage, sender::ProcessorSender, ui::UiProcessorMessage, listener::ListenProcessorMessage};
 
+mod authorization;
 mod event;
 mod chord;
 pub use chord::ChordState;
@@ -59,7 +60,11 @@ pub(crate) struct RouterProcessorState {
     sender: ProcessorSender,
     receiver: Receiver<RouterProcessorMessage>,
 
+    // Link items
+    approval_codes: HashMap<String, Instant>,
+    incoming_links: HashMap<String, Sender<PendingLinkControl>>,
     links: HashMap<Relation, Link>,
+    
     pending_links: HashMap<Relation, (Instant, u8, Vec<Message>)>,
 
     // Event items
@@ -89,6 +94,9 @@ impl RouterProcessorState {
             sender,
             receiver,
 
+            // Link items
+            approval_codes: HashMap::new(),
+            incoming_links: HashMap::new(),
             links: HashMap::new(),
             pending_links: HashMap::new(),
 
@@ -119,9 +127,20 @@ impl RouterProcessorState {
                     RouterProcessorMessage::PeripheralMessage(rel, msg) => {
                         self.process_remote_message(rel, msg).await;
                     }
-
                     RouterProcessorMessage::NewLink(link) => {
-                        self.new_link(link).await;
+                        self.new_link_handler(link).await;
+                    }
+                    RouterProcessorMessage::ApproveLink(relation) => {
+                        self.approve_link_handler(relation).await;
+                    }
+                    RouterProcessorMessage::DenyLink(relation) => {
+                        self.deny_link_handler(relation).await;
+                    }
+                    RouterProcessorMessage::SetApprovalCode(code) => {
+                        self.set_approval_code_handler(code).await;
+                    }
+                    RouterProcessorMessage::ApprovedLink(link) => {
+                        self.approved_link_handler(link).await;
                     }
 
                     RouterProcessorMessage::SendMessage(rel, msg) => {
@@ -152,7 +171,7 @@ impl RouterProcessorState {
                             let new_link = Link::connect(self_relation, addr, relation).await;
                             if let Some(new_link) = new_link {
                                 println!("New link connected");
-                                self.new_link(new_link).await;
+                                self.approved_link_handler(new_link).await;
                             }else{
                                 println!("Link failed to connect");
                             }
@@ -199,6 +218,9 @@ impl RouterProcessorState {
                     RouterProcessorMessage::SetNickname(rel, name) => {
                         self.set_identity_system(rel, "nickname".into(), name).await;
                     }
+                    RouterProcessorMessage::ClearDirectoryEntry(rel) => {
+                        self.clear_directory_entry_handler(rel).await;
+                    }
 
                     RouterProcessorMessage::Upkeep => {
                         // should check for disconnected peers, and clean them up
@@ -208,7 +230,7 @@ impl RouterProcessorState {
 
                         // Save chord state
                         for (name, chord_entry) in self.chords.iter_mut() {
-                            let mut associate = chord_entry.get_associate();
+                            let associate = chord_entry.get_associate();
 
                             associate.send_op(AssociateRequest::GetPeerAddresses).await;
                             let peer_addrs = match associate.recv_op(None).await {
@@ -240,9 +262,13 @@ impl RouterProcessorState {
                             self.send_msg(rel, msg).await;
                         }
                         
-
                         // Save Directory state
                         self.state.save_directory(&self.directory).await;
+
+                        // Clean approval codes
+                        self.approval_codes.retain(|_, v|{
+                            v < &mut Instant::now()
+                        });
                     }
                 }
             }
@@ -324,6 +350,14 @@ impl RouterProcessorState {
 
     async fn process_remote_message(&mut self, rel: Relation, msg: RouterMessage) {
         match msg {
+            // Authorization messages
+            RouterMessage::Pending => {} // base sends this, not recv
+            // This message should not be recvd here, since it is only valid
+            // when the link is pending and messages that arrive here
+            // are already approved.
+            RouterMessage::ApprovalCode(_) => {}
+            RouterMessage::Approved => {} // base sends this, not recv
+            RouterMessage::Denied => {} // base sends this, not recv
 
             // Event Messages
             RouterMessage::SendEvent(name, externals, data) => {
@@ -390,7 +424,7 @@ impl RouterProcessorState {
         }
     }
 
-    async fn new_link(&mut self, mut link: Link) {
+    async fn approved_link_handler(&mut self, mut link: Link) {
         println!("Adding new link");
         // get reciever+relation from link
         let mut rx = match link.take_recv() {

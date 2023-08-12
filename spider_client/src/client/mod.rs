@@ -1,16 +1,15 @@
-
 use std::{
     fs, io,
-    path::{Path, PathBuf}, net::SocketAddr,
+    path::{Path, PathBuf},
 };
 
 use crate::SpiderClientState;
-use spider_link::Relation;
+use spider_link::{Relation, Keyfile, Role};
 
 use self::processor::SpiderClientProcessor;
 
-pub mod processor;
 mod channel;
+pub mod processor;
 pub use channel::ClientChannel;
 
 mod message;
@@ -54,7 +53,7 @@ impl SpiderClientBuilder {
                 func(&mut client);
                 client.save();
                 client
-            },
+            }
         }
     }
 
@@ -64,7 +63,7 @@ impl SpiderClientBuilder {
         }
     }
 
-    pub fn start(self, enable_recv: bool) -> ClientChannel{
+    pub fn start(self, enable_recv: bool) -> ClientChannel {
         let (channel, _) = SpiderClientProcessor::start(self.state_path, self.state, enable_recv);
         channel
     }
@@ -89,32 +88,50 @@ impl SpiderClientBuilder {
         self.state.host_relation = None;
     }
 
+    pub fn set_permission_code(&mut self, code: Option<String>) {
+        self.state.permission_code = code;
+    }
+
     // Connection strategies
-    pub fn enable_last_addr(&mut self, set: bool){
+    pub fn enable_last_addr(&mut self, set: bool) {
         self.state.last_addr_enable = set;
     }
-    pub fn set_last_addr(&mut self, set: Option<String>){
+    pub fn set_last_addr(&mut self, set: Option<String>) {
         self.state.set_last_addr(set);
     }
-    
+
     // Beacon
-    pub fn enable_beacon(&mut self, set: bool){
+    pub fn enable_beacon(&mut self, set: bool) {
         self.state.beacon_enable = set;
     }
 
     // Chord
-    pub fn enable_chord(&mut self, set: bool){
+    pub fn enable_chord(&mut self, set: bool) {
         self.state.chord_enable = set;
     }
-    pub fn set_chord_addrs(&mut self, set: Vec<String>){
+    pub fn set_chord_addrs(&mut self, set: Vec<String>) {
         self.state.chord_addrs = set;
     }
 
     // Fixed addresses
-    pub fn enable_fixed_addrs(&mut self, set: bool){
+    pub fn enable_fixed_addrs(&mut self, set: bool) {
         self.state.fixed_addr_enable = set;
     }
-    pub fn set_fixed_addrs(&mut self, addrs: Vec<String>){
+    pub fn set_fixed_addrs(&mut self, addrs: Vec<String>) {
         self.state.fixed_addrs = addrs;
+    }
+
+    // Other Operations
+    pub async fn try_use_keyfile<P>(&mut self, path: P)
+    where
+        P: AsRef<Path>,
+    {
+        let keyfile = Keyfile::read_from_file(path).await;
+        if let Some(keyfile) = keyfile {
+            let other_relation = Relation {id: keyfile.id, role: Role::Peer};
+            self.set_host_relation(other_relation);
+            self.set_permission_code(keyfile.permission_code);
+            self.save();
+        }
     }
 }

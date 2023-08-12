@@ -8,6 +8,7 @@ use crate::processor::message::ProcessorMessage;
 pub enum UiProcessorMessage {
     RemoteMessage(Relation, UiMessage),
     DatasetUpdate(AbsoluteDatasetPath, Vec<DatasetData>),
+    SetSettingHeader{header: String},
     SetSetting {
         header: String,
         title: String,
@@ -36,6 +37,12 @@ impl std::fmt::Debug for UiProcessorMessage {
                 .field("path", path)
                 .field("dataset", dataset)
                 .finish(),
+            Self::SetSettingHeader {
+                    header,
+                } => f
+                    .debug_struct("SetSettingHeader")
+                    .field("header", header)
+                    .finish(),
             Self::SetSetting {
                 header,
                 title,

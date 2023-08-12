@@ -9,11 +9,13 @@ use serde::{Deserialize, Serialize};
 use tokio::{net::ToSocketAddrs, sync::{mpsc::Receiver, Mutex}};
 
 pub mod link;
-pub mod message;
 pub use link::Link;
+pub mod message;
 pub mod id;
 use id::SpiderId;
 pub mod beacon;
+mod keyfile;
+pub use keyfile::Keyfile;
 
 pub type SpiderId2048 = SpiderId<294>; // 2048 bit pub key takes 294 bytes
 

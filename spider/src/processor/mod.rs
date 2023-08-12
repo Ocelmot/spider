@@ -2,6 +2,7 @@ use std::io::Error;
 use std::path::PathBuf;
 use std::{path::Path, time::Duration};
 
+use spider_link::Keyfile;
 use spider_link::message::Message;
 use tokio::{
     sync::mpsc::{channel, Receiver},
@@ -170,9 +171,9 @@ impl Processor {
         // start processing
         let handle = tokio::spawn(async move {
             if let Some(path) = &self.config.keyfile_path {
-                let path = PathBuf::from(path);
-                let data = serde_json::to_string(&self.state.self_id().await).unwrap();
-                tokio::fs::write(&*path, data).await;
+                let id = self.state.self_id().await;
+                let kf = Keyfile::new(id, None);
+                kf.write_to_file(path).await;
             }
 
             let id = self.state.self_id().await.to_base64();
@@ -198,6 +199,12 @@ impl Processor {
                 data: String::new(),
             };
             self.ui.send(msg).await;
+
+            // init setting headers to set the order
+            self.ui.send(UiProcessorMessage::SetSettingHeader { header: "Pending Connections".into() }).await;
+            self.ui.send(UiProcessorMessage::SetSettingHeader { header: "Peripheral Services".into() }).await;
+            self.ui.send(UiProcessorMessage::SetSettingHeader { header: "Connected Chords".into() }).await;
+            self.ui.send(UiProcessorMessage::SetSettingHeader { header: "Directory".into() }).await;
 
 
             loop {

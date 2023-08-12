@@ -10,6 +10,12 @@ use super::DatasetData;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RouterMessage {
+    // Authorization messages
+    Pending,
+    ApprovalCode(String),
+    Approved,
+    Denied,
+
     // Event messages
     SendEvent(String, Vec<Relation>, DatasetData),
     Event(String, Relation, DatasetData),

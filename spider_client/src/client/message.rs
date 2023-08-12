@@ -9,6 +9,7 @@ pub enum ClientControl {
     SetOnMessage(Option<Box<dyn FnMut(&ClientChannel, Message) + Send>>),
     SetOnConnect(Option<Box<dyn FnMut(&ClientChannel) + Send>>),
     SetOnTerminate(Option<Box<dyn FnMut(SpiderClientBuilder) + Send>>),
+    SetOnDeny(Option<Box<dyn FnMut(SpiderClientBuilder) + Send>>),
     Terminate,
 }
 
@@ -16,5 +17,7 @@ pub enum ClientControl {
 pub enum ClientResponse {
     Message(Message),
     Connected,
+    Disconnected,
     Terminated(SpiderClientBuilder),
+    Denied(SpiderClientBuilder),
 }

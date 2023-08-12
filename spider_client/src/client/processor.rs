@@ -30,7 +30,9 @@ pub struct SpiderClientProcessor {
     link: Option<Link>,
     on_message: Option<Box<dyn FnMut(&ClientChannel, Message) + Send>>,
     on_connect: Option<Box<dyn FnMut(&ClientChannel) + Send>>,
+    on_disconnect: Option<Box<dyn FnMut(&ClientChannel) + Send>>,
     on_terminate: Option<Box<dyn FnMut(SpiderClientBuilder) + Send>>,
+    on_deny: Option<Box<dyn FnMut(SpiderClientBuilder) + Send>>,
     channels: Vec<UnboundedSender<ClientResponse>>,
 }
 
@@ -43,14 +45,15 @@ impl SpiderClientProcessor {
         if state.host_relation.is_none() {
             panic!("Processor requires a host to be able to connect");
         }
+        let id = state.self_relation.relation.id.clone();
 
         let (sender, receiver) = channel(50);
         let (client_channel, channels) = if enable_recv {
             let (tx, rx) = unbounded_channel();
-            let client_channel = ClientChannel::with_receiver(sender, rx);
+            let client_channel = ClientChannel::with_receiver(id, sender, rx);
             (client_channel, vec![tx])
         } else {
-            let client_channel = ClientChannel::new(sender);
+            let client_channel = ClientChannel::new(id, sender);
             (client_channel, Vec::new())
         };
 
@@ -63,7 +66,9 @@ impl SpiderClientProcessor {
             link: None,
             on_message: None,
             on_connect: None,
+            on_disconnect: None,
             on_terminate: None,
+            on_deny: None,
             channels,
         };
 
@@ -89,6 +94,24 @@ impl SpiderClientProcessor {
                                 // new message from base
                                 match msg {
                                     Some(msg) => {
+                                        if let Message::Router(RouterMessage::Pending) = &msg {
+                                            // if we are pending, send saved permission code
+                                            if let Some(code) = &processor.state.permission_code {
+                                                let msg = RouterMessage::ApprovalCode(code.clone());
+                                                let msg = Message::Router(msg);
+                                                link.send(msg).await;
+                                            }
+                                        }
+                                        if let Message::Router(RouterMessage::Denied) = &msg {
+                                            let mut builder = SpiderClientBuilder {
+                                                state_path: processor.state_path.clone(),
+                                                state: processor.state.clone(),
+                                            };
+                                            // Since the connection is denied, remove the host relation
+                                            builder.state.host_relation = None;
+                                            processor.process_client_response(ClientResponse::Denied(builder)).await;
+                                            return;
+                                        }
                                         if let Message::Router(RouterMessage::ChordAddrs(addrs)) = &msg {
                                             processor.state.chord_addrs = addrs.clone();
                                             processor.save_state();
@@ -98,6 +121,7 @@ impl SpiderClientProcessor {
                                     None => {
                                         // became disconected
                                         processor.link = None;
+                                        processor.process_client_response(ClientResponse::Disconnected).await
                                     },
                                 }
                             }
@@ -151,7 +175,6 @@ impl SpiderClientProcessor {
                 self.link_send(msg).await;
             }
             ClientControl::AddChannel(ch) => {
-                println!("ADDING CHANNEL!");
                 self.channels.push(ch);
             }
             ClientControl::SetOnMessage(cb) => {
@@ -162,6 +185,9 @@ impl SpiderClientProcessor {
             }
             ClientControl::SetOnTerminate(cb) => {
                 self.on_terminate = cb;
+            }
+            ClientControl::SetOnDeny(cb) => {
+                self.on_deny = cb;
             }
             ClientControl::Terminate => {
                 self.terminate = true;
@@ -202,8 +228,18 @@ impl SpiderClientProcessor {
                     cb(&self.client_channel);
                 }
             }
+            ClientResponse::Disconnected => {
+                if let Some(cb) = &mut self.on_disconnect {
+                    cb(&self.client_channel);
+                }
+            }
             ClientResponse::Terminated(builder) => {
                 if let Some(cb) = &mut self.on_terminate {
+                    cb(builder.clone());
+                }
+            }
+            ClientResponse::Denied(builder) => {
+                if let Some(cb) = &mut self.on_deny {
                     cb(builder.clone());
                 }
             }

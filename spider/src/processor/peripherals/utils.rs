@@ -1,10 +1,11 @@
 use std::{path::{PathBuf, Path}, str::FromStr, process::Stdio, io::SeekFrom, env};
 
+use rand::distributions::{Alphanumeric, DistString};
 use regex::Regex;
-use spider_link::message::UiInput;
+use spider_link::{message::{UiInput, Message}, Keyfile};
 use tokio::{process::{Command, Child}, fs::{File, self, OpenOptions}, io::{AsyncReadExt, AsyncWriteExt, AsyncSeekExt}};
 
-use crate::processor::{message::ProcessorMessage, ui::UiProcessorMessage};
+use crate::processor::{message::ProcessorMessage, ui::UiProcessorMessage, router::RouterProcessorMessage};
 
 use super::{PeripheralProcessorState, PeripheralProcessorMessage, manifest::PeripheralManifest};
 
@@ -49,8 +50,14 @@ impl PeripheralProcessorState{
 
     pub(crate) async fn write_keyfile(&self, mut path: PathBuf){
         path.push("spider_keyfile.json");
-        let data = serde_json::to_string(&self.state.self_id().await).unwrap();
-        tokio::fs::write(&*path, data).await;
+
+        let id = self.state.self_id().await;
+        let permission_code: String =  Alphanumeric.sample_string(&mut rand::thread_rng(), 10);
+        Keyfile::write_new(path, id, Some(permission_code.clone())).await;
+
+        let msg = RouterProcessorMessage::SetApprovalCode(permission_code);
+        let msg = ProcessorMessage::RouterMessage(msg);
+        self.sender.send(msg).await;
     }
 
     pub(crate) async fn launch_peripheral_service(&mut self, name: String) -> Option<Child>{

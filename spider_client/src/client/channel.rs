@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use spider_link::message::Message;
+use spider_link::{message::Message, SpiderId2048};
 use tokio::sync::mpsc::{unbounded_channel, Sender, UnboundedReceiver};
 
 use crate::SpiderClientBuilder;
@@ -8,22 +8,29 @@ use crate::SpiderClientBuilder;
 use super::{ClientControl, ClientResponse};
 
 pub struct ClientChannel {
+    self_id: SpiderId2048,
     sender: Sender<ClientControl>,
     receiver: Option<UnboundedReceiver<ClientResponse>>,
 }
 
 impl ClientChannel {
-    pub fn new(sender: Sender<ClientControl>) -> Self {
+    pub(super) fn new(id: SpiderId2048, sender: Sender<ClientControl>) -> Self {
         Self {
+            self_id: id,
             sender,
             receiver: None,
         }
     }
-    pub fn with_receiver(sender: Sender<ClientControl>, receiver: UnboundedReceiver<ClientResponse>) -> Self {
+    pub(super) fn with_receiver(id: SpiderId2048, sender: Sender<ClientControl>, receiver: UnboundedReceiver<ClientResponse>) -> Self {
         Self {
+            self_id: id,
             sender,
             receiver: Some(receiver),
         }
+    }
+
+    pub fn id(&self) -> &SpiderId2048 {
+        &self.self_id
     }
 
     pub async fn send(&self, msg: Message) {
@@ -99,6 +106,7 @@ impl ClientChannel {
 impl Clone for ClientChannel {
     fn clone(&self) -> Self {
         Self {
+            self_id: self.self_id.clone(),
             sender: self.sender.clone(),
             receiver: None,
         }

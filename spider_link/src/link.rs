@@ -15,20 +15,23 @@ use tokio::{
 		channel,
 		Sender,
 		Receiver, error::SendError
-	}, Mutex},
+	}, Mutex, Notify},
 	select,
-	io::{AsyncReadExt, AsyncWriteExt}
+	io::{AsyncReadExt, AsyncWriteExt}, task::JoinHandle
 };
 use tracing::{error, info};
 
 use crate::{message::{Frame, Message, Protocol, KeyRequest}, SelfRelation, Relation};
 #[derive(Debug)]
 pub struct Link{
-	own_relation: SelfRelation,
+	self_relation: SelfRelation,
 	other_relation: Relation,
 
 	out_tx: Sender<Message>,
 	in_rx: Option<Receiver<Message>>,
+
+	notify_exit: Arc<Notify>,
+	handle: JoinHandle<()>,
 }
 
 impl Link{
@@ -116,8 +119,8 @@ impl Link{
 		key.ok()
 	}
 
-	pub fn own_relation(&self) -> &SelfRelation{
-		&self.own_relation
+	pub fn self_relation(&self) -> &SelfRelation{
+		&self.self_relation
 	}
 
 	pub fn other_relation(&self) -> &Relation{
@@ -137,6 +140,11 @@ impl Link{
 
 	pub fn take_recv(&mut self) -> Option<Receiver<Message>>{
 		self.in_rx.take()
+	}
+
+	pub async fn terminate(self){
+		self.notify_exit.notify_waiters();
+		self.handle.await;
 	}
 }
 
@@ -387,9 +395,15 @@ impl LinkBuilder{
 		let (out_tx, mut out_rx) = channel(50); 
 		let (in_tx, in_rx) = channel(50);
 
-		tokio::spawn(async move{
+		let notify_exit = Arc::new(Notify::new());
+		let notify_exit_copy = notify_exit.clone();
+
+		let handle = tokio::spawn(async move{
 			loop{
 				select! {
+					_ = notify_exit.notified() => {
+						break; // exit the loop to stop the processor
+					}
 					data = self.read_frame() => {
 						match data{
 							Some(data) => {
@@ -431,10 +445,12 @@ impl LinkBuilder{
 
 
 		Link{
-			own_relation,
+			self_relation: own_relation,
 			other_relation,
 			out_tx,
 			in_rx: Some(in_rx),
+			notify_exit: notify_exit_copy,
+			handle,
 		}
 	}
 }
