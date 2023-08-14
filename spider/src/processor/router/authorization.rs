@@ -1,15 +1,15 @@
-use std::{
-    collections::HashSet,
-    time::Duration,
-};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use spider_link::{
-    message::{Message, RouterMessage},
-    Link, Relation,
+    message::{Message, RouterMessage, UiMessage},
+    Link,
 };
 use tokio::{
     select, spawn,
-    sync::mpsc::{channel, Sender},
+    sync::{
+        mpsc::{channel, Sender},
+        watch,
+    },
     time::Instant,
 };
 
@@ -62,7 +62,9 @@ impl RouterProcessorState {
             let sender = self.sender.clone();
             let codes = self.approval_codes.clone();
             let codes = codes.keys().cloned().collect();
-            let ctrl = pending_link_processor(sender, link, codes);
+            let should_approve_ui = self.should_approve_ui.clone();
+            // let x = self.should_approve_ui.clone();
+            let ctrl = pending_link_processor(sender, link, codes, should_approve_ui);
 
             self.incoming_links.insert(rel.clone().to_base64(), ctrl);
             // Insert setting
@@ -136,6 +138,7 @@ fn pending_link_processor(
     sender: ProcessorSender,
     mut link: Link,
     mut codes: HashSet<String>,
+    mut should_approve_ui: Arc<watch::Sender<bool>>,
 ) -> Sender<PendingLinkControl> {
     let (tx, mut rx) = channel(50);
     spawn(async move {
@@ -145,6 +148,8 @@ fn pending_link_processor(
         let mut rx_closed = false;
         let mut code_attempts = 0;
         let mut backlog = Vec::new();
+        let mut recvd_ui = false;
+        let mut should_approve_ui_recv = should_approve_ui.subscribe();
         loop {
             select! {
                 msg = rx.recv(), if !rx_closed => {
@@ -187,12 +192,14 @@ fn pending_link_processor(
                 msg = link.recv() => {
                     match msg {
                         Some(msg) => {
-                            if let Message::Router(RouterMessage::ApprovalCode(new_code)) = msg {
-                                if codes.contains(&new_code) {
+
+                            // check incoming message for approval code
+                            if let Message::Router(RouterMessage::ApprovalCode(new_code)) = &msg {
+                                if codes.contains(new_code) {
                                     approve_link(sender, link, backlog).await;
                                     break;
                                 } else {
-                                    code = Some(new_code);
+                                    code = Some(new_code.clone());
                                     code_attempts += 1;
                                     if code_attempts > 5 {
                                         // too many incorrect attempts
@@ -200,13 +207,27 @@ fn pending_link_processor(
                                         break;
                                     }
                                 }
-                            } else {
-                                backlog.push(msg);
-                                if backlog.len() > 100 {
-                                    // too many messages in backlog
-                                    deny_link(sender, link).await;
+                            }
+
+                            // check incoming message is ui subscription
+                            if let Message::Ui(UiMessage::Subscribe) = &msg {
+                                recvd_ui = true;
+                                if *should_approve_ui_recv.borrow() {
+                                    // a new connection is added because it is a ui.
+                                    // reset the condition to stop further connections being approved
+                                    should_approve_ui.send_if_modified(|val|{if !*val {false} else {*val = false; true}});
+                                    backlog.push(msg);
+                                    approve_link(sender, link, backlog).await;
                                     break;
                                 }
+                            }
+
+                            // add the message to the backlog
+                            backlog.push(msg);
+                            if backlog.len() > 100 {
+                                // too many messages in backlog
+                                deny_link(sender, link).await;
+                                break;
                             }
                         },
                         None => {
@@ -214,6 +235,14 @@ fn pending_link_processor(
                             deny_link(sender, link).await;
                             break;
                         },
+                    }
+                },
+                _ = should_approve_ui_recv.changed() => {
+
+                    if *should_approve_ui_recv.borrow() && recvd_ui{
+
+                        approve_link(sender, link, backlog).await;
+                        break;
                     }
                 }
             };
@@ -223,7 +252,6 @@ fn pending_link_processor(
 }
 
 async fn approve_link(mut sender: ProcessorSender, link: Link, backlog: Vec<Message>) {
-    
     // Send approved link to link
     link.send(Message::Router(RouterMessage::Approved)).await;
 
@@ -250,9 +278,9 @@ async fn approve_link(mut sender: ProcessorSender, link: Link, backlog: Vec<Mess
     }
 }
 
-async fn deny_link(mut sender: ProcessorSender, link: Link){
+async fn deny_link(mut sender: ProcessorSender, link: Link) {
     link.send(Message::Router(RouterMessage::Denied)).await;
-    
+
     // update settings page
     let rel = link.other_relation().clone();
     let sig = rel.id.to_base64();
@@ -263,5 +291,4 @@ async fn deny_link(mut sender: ProcessorSender, link: Link){
         title,
     };
     sender.send_ui(msg).await;
-
 }

@@ -1,13 +1,13 @@
-use std::{collections::{HashMap, HashSet}, time::Duration};
+use std::{collections::{HashMap, HashSet}, time::Duration, sync::Arc};
 
-use dht_chord::{chord::ChordHandle, associate::{AssociateRequest, AssociateResponse}, TCPChord};
+use dht_chord::associate::{AssociateRequest, AssociateResponse};
 use lru::LruCache;
 use spider_link::{
     message::{Message, RouterMessage, DirectoryEntry},
     Link, Relation, Role, SpiderId2048,
 };
 use tokio::{
-    sync::mpsc::{channel, error::SendError, Receiver, Sender},
+    sync::{mpsc::{channel, error::SendError, Receiver, Sender}, watch},
     task::{JoinError, JoinHandle}, time::Instant, select,
 };
 
@@ -61,6 +61,7 @@ pub(crate) struct RouterProcessorState {
     receiver: Receiver<RouterProcessorMessage>,
 
     // Link items
+    should_approve_ui: Arc<watch::Sender<bool>>,
     approval_codes: HashMap<String, Instant>,
     incoming_links: HashMap<String, Sender<PendingLinkControl>>,
     links: HashMap<Relation, Link>,
@@ -88,6 +89,7 @@ impl RouterProcessorState {
         sender: ProcessorSender,
         receiver: Receiver<RouterProcessorMessage>,
     ) -> Self {
+        let (should_approve_ui, _) = watch::channel(false);
         Self {
             config,
             state,
@@ -95,6 +97,7 @@ impl RouterProcessorState {
             receiver,
 
             // Link items
+            should_approve_ui: Arc::new(should_approve_ui),
             approval_codes: HashMap::new(),
             incoming_links: HashMap::new(),
             links: HashMap::new(),

@@ -23,6 +23,11 @@ impl RouterProcessorState{
         // load directory from state
         self.directory = self.state.load_directory().await;
 
+        // if directory is empty, then allow a single ui connection
+        if self.directory.is_empty() {
+            self.should_approve_ui.send_replace(true);
+        }
+
         // create setting listing for directory entries
         for (_, entry) in self.directory.clone(){
             self.set_directory_setting(entry).await;
