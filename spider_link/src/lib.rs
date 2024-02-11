@@ -1,3 +1,24 @@
+#![deny(missing_docs)]
+
+
+//! The spider_link crate encapsulates everything realated to esablishing
+//! a link between any two members of the spider network.
+//! 
+//! To develop a peripheral for the spider network, use the spider_client
+//! crate. That crate includes this crate, re-exports the needed types and
+//! functions, and adds useful functionality around finding and
+//! reestablishing connections.
+//! 
+//! There are two broad categories of connection: the Peer, and the Peripheral.
+//! A Peer connection represents a link from one base to another base.
+//! The primary use for this is to send data, as much of the other
+//! functionality of the base is prohibited to other peers.
+//! A Peripheral connection represents a connection to a process that is
+//! closely associated with the base. This could be an embedded device or
+//! a mobile app used to interface with the base. These types of
+//! connections are trusted. 
+
+
 use std::sync::Arc;
 
 use base64::{engine::general_purpose, Engine};
@@ -17,21 +38,37 @@ pub mod beacon;
 mod keyfile;
 pub use keyfile::Keyfile;
 
-pub type SpiderId2048 = SpiderId<294>; // 2048 bit pub key takes 294 bytes
+// TODO: This should be renamed to SpiderId, and the generic id
+// renamed to something else.
+/// The id used by the spider protocol.
+/// The id is a 2048 bit public key, it requires 294 bytes to represent.
+pub type SpiderId2048 = SpiderId<294>;
 
+/// The type of relationship of one member of the link.
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Role {
+    /// This member of the link is a peripheral, it can use any of the
+    /// services the base provides.
     Peripheral,
+    /// This member of the link is a base, if it is connected to a peripheral
+    /// it can manage that peripheral. If it is connected to another base,
+    /// it can pass data messages to that base for further processing.
     Peer,
 }
 
+/// The Relation includes both the id and role of a member of the network.
+/// Typically represents the other side of the connection.
+/// The local side of the connection is typically a [SelfRelation].
 #[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 pub struct Relation {
+    /// The role in the connection that this member fills.
     pub role: Role,
+    /// The id of the newwork member
     pub id: SpiderId2048,
 }
 
 impl Relation{
+    /// Returns true of this relation represents a peripheral
     pub fn is_peripheral(&self) -> bool{
         if let Role::Peripheral = self.role{
             true
@@ -40,6 +77,7 @@ impl Relation{
         }
     }
 
+    /// Returns true if this relation represents a peer
     pub fn is_peer(&self) -> bool{
         if let Role::Peer = self.role{
             true
@@ -48,6 +86,7 @@ impl Relation{
         }
     }
 
+    /// Returns a base 64 encoded representation of this relation
     pub fn to_base64(&self) -> String {
         let role: u8 = match self.role {
             Role::Peripheral => 1,
@@ -57,6 +96,8 @@ impl Relation{
         bytes.push(role);
         general_purpose::URL_SAFE_NO_PAD.encode(bytes)
     }
+
+    /// Optionally returns a Relation from a decoded base64 string
     pub fn from_base64(s: String) -> Option<Self> {
         match general_purpose::URL_SAFE_NO_PAD.decode(s){
             Ok(mut v) => {
@@ -79,6 +120,8 @@ impl Relation{
         }
     }
 
+    /// Optionally returns a relation from an id from a base64 encoded
+    /// string, and a role of peripheral.
     pub fn peripheral_from_base_64<S: Into<String>>(s: S) -> Option<Self>{
         match SpiderId2048::from_base64(s) {
             Some(id) => {
@@ -90,6 +133,9 @@ impl Relation{
             None => None,
         }
     }
+
+    /// Optionally returns a relation from an id from a base64 encoded
+    /// string, and a role of peer.
     pub fn peer_from_base_64<S: Into<String>>(s: S) -> Option<Self>{
         match SpiderId2048::from_base64(s) {
             Some(id) => {
@@ -102,6 +148,7 @@ impl Relation{
         }
     }
 
+    /// Returns a string with the sha256 hash of the the relation
     pub fn sha256(&self) -> String{
         let role: u8 = match self.role {
             Role::Peripheral => 1,
@@ -113,13 +160,19 @@ impl Relation{
     }
 }
 
+/// A self relation functions similarly to a [Relation], but it also includes
+/// the private key that corresponds to the id.
+/// Typically represents the local side of a connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelfRelation {
+    /// The private key of the local node
     pub priv_key_der: Vec<u8>,
+    /// The Relation of the local node
     pub relation: Relation,
 }
 
 impl SelfRelation {
+    /// Create a SelfRelation from a private key and a role
     pub fn from_key(key: RsaPrivateKey, role: Role) -> Self {
         let priv_bytes = key.to_pkcs8_der().unwrap().as_ref().to_vec();
         let pub_bytes = key.to_public_key().to_public_key_der().unwrap();
@@ -129,26 +182,35 @@ impl SelfRelation {
             relation: Relation { id, role },
         }
     }
+    /// Create a SelfRelation from a der representation
+    /// of a private key and a role
     pub fn from_der(bytes: &[u8], role: Role) -> Self {
         let key = RsaPrivateKey::from_pkcs8_der(bytes).unwrap();
         Self::from_key(key, role)
     }
 
+    /// Generate a new SelfRelation with the given Role.
     pub fn generate_key(role: Role) -> Self {
         let mut rng = rand::thread_rng();
         let key = RsaPrivateKey::new(&mut rng, 2048).expect("failed to generate key");
         Self::from_key(key, role)
     }
 
+    /// Get the private key of this SelfRelation
     pub fn private_key(&self) -> RsaPrivateKey {
         RsaPrivateKey::from_pkcs8_der(&self.priv_key_der).unwrap()
     }
 
-    // connect: to connect to a particular address
+    /// Optionally establish a link to an ip address using this
+    /// SelfRelation and a provided other Relation
     pub async fn connect_to<A: ToSocketAddrs>(&self, addr: A, relation: Relation) -> Option<Link> {
         Link::connect(self.clone(), addr, relation).await
     }
-    // listener: to generate new connections
+
+    /// Start a listener using this SelfRelation and an ip address to bind
+    /// the listener to. Returns both a channel through which new [Links](Link)
+    /// will be sent, and a mutex to control if this listener will respond
+    /// to key requests.
     pub fn listen<A: ToSocketAddrs + Send + 'static>(&self, addr: A) -> (Receiver<Link>, Arc<Mutex<Option<String>>>) {
         Link::listen(self.clone(), addr)
     }

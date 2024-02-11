@@ -7,13 +7,17 @@ use super::UiElement;
 
 
 
-
+/// An UpdateSummary is returned when some UiElementUpdate is applied to a
+/// UiPage or a UiElement within that page. It records if a change actually
+/// took place, and the change in how many UiElements subscribe to each
+/// dataset.
 pub struct UpdateSummary{
     changed: bool,
     dataset_subscriptions: HashMap<AbsoluteDatasetPath, isize>,
 }
 
 impl UpdateSummary{
+    /// Create a new UpdateSummary with no changes recorded.
     pub fn new() -> Self{
         Self { 
             changed: false,
@@ -21,16 +25,21 @@ impl UpdateSummary{
         }
     }
 
-    // Getters and Setters
+    // Getters and 
+    /// Was there a change in this update?
     pub fn changed(&self) -> bool {
         self.changed
     }
 
+    /// Returns a map from an [AbsoluteDatasetPath] to the net change in
+    /// subscriptions to that dataset. This might not be a comprehensive list
+    /// of all subscribed datasets, only of ones where some change occured.
     pub fn dataset_subscriptions(&self) -> &HashMap<AbsoluteDatasetPath, isize>{
         &self.dataset_subscriptions
     }
 
     // Utility functions
+    /// Increase the count of subscriptions to the given dataset.
     fn add_dataset(&mut self, path: &AbsoluteDatasetPath){
         match self.dataset_subscriptions.get_mut(&path) {
             Some(count) => {
@@ -41,19 +50,21 @@ impl UpdateSummary{
             },
         }
     }
+    /// Decrease the count of subscriptions to the given dataset.
     fn remove_dataset(&mut self, path: &AbsoluteDatasetPath){
         match self.dataset_subscriptions.get_mut(&path) {
             Some(count) => {
                 *count -= 1;
             },
             None => {
-                self.dataset_subscriptions.insert(path.clone(), 1);
+                self.dataset_subscriptions.insert(path.clone(), -1);
             },
         }
     }
 
-
-    // Change registration
+    /// Calculate the changes between the old [UiElement] and the new one.
+    /// This includes changes to content as well as changes to dataset
+    /// subscriptions.
     pub fn element(&mut self, old: &UiElement, new: &UiElement){
         // Changed:
         self.changed |= old.kind != new.kind;
@@ -94,6 +105,9 @@ impl UpdateSummary{
         }
     }
 
+    
+    
+    /// Calculate the changes in dataset subscriptions due to adding an element.
     pub fn add(&mut self, elem: &UiElement){
         // Changed: always changed
         self.changed = true;
@@ -107,6 +121,8 @@ impl UpdateSummary{
         }
     }
 
+    /// Calculate the changes in dataset subscriptions due to removing
+    /// an element.
     pub fn remove(&mut self, elem: &UiElement){
         // Changed: always changed
         self.changed = true;
@@ -120,6 +136,7 @@ impl UpdateSummary{
         }
     }
 
+    /// Calculate the changes due to moving a child's position.
     pub fn move_to(&mut self, _elem: &UiElement){
         // Changed: always changed
         self.changed = true;

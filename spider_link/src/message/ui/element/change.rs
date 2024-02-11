@@ -9,6 +9,9 @@ use crate::message::ui::page::UiPath;
 
 use super::UiElement;
 
+/// A UiElementChange tracks if a [UiElement] has changed, if its children were
+/// accessed, and which operations were performed on its children. This is done
+/// in order to track changes to the elements.
 #[derive(Debug, Clone, Default)]
 pub struct UiElementChange {
     this_changed: bool,
@@ -16,58 +19,88 @@ pub struct UiElementChange {
     child_operations: Vec<UiChildOperations>,
 }
 
+/// A change to the set of children that a [UiElement] could make.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UiChildOperations {
+    /// Insert a [UiElement] as a child at the indicated position.
     Insert(usize, UiElement),
+    /// Delete the [UiElement] at the indicated position.
     Delete(usize),
-    MoveTo { from: usize, to: usize },
+    /// Move the [UiElement] from the one indicated position to the other.
+    MoveTo {
+        /// Move the [UiElement] from this position
+        from: usize,
+        /// Move the [UiElement] to this position
+        to: usize
+    },
 }
 
 impl UiElementChange {
+    /// Create a new, default [UiElementChange].
     pub fn new() -> Self {
         Self::default()
     }
+    /// Take the UiElementChange refered to by mutable reference, leaving a
+    /// new, empty one in its place.
     pub fn take(&mut self) -> Self {
         let mut new = Self::new();
         mem::swap(self, &mut new);
         new
     }
 
+    /// Update this UiElementChange with another by reference, cloning its
+    /// child operations. 
     pub fn update(&mut self, other: &UiElementChange) {
         self.this_changed |= other.this_changed;
         self.children_accessed |= other.children_accessed;
         self.child_operations
             .append(&mut other.child_operations.clone());
     }
+    /// Update this UiElementChange with another by ownership, without cloning
+    /// its child operations.
     pub fn absorb(&mut self, mut other: UiElementChange) {
         self.this_changed |= other.this_changed;
         self.children_accessed |= other.children_accessed;
         self.child_operations.append(&mut other.child_operations);
     }
 
+    /// Has this UiElementChange been changed?
     pub fn changed(&self) -> bool {
         self.this_changed
     }
+    /// Set the changed flag in this UiElementChange to indicate that a change
+    /// has occurred
     pub fn set_changed(&mut self) {
         self.this_changed = true;
     }
+    /// Set the changed flag in this UiElementChange to indicate that a change
+    /// has not occurred
     pub fn clear_changed(&mut self) {
         self.this_changed = false;
     }
 
+    /// Has any child of this UiElementChange been accessed?
     pub fn children_accessed(&self) -> bool {
         self.children_accessed
     }
+    /// Set the children accessed flag in this UiElementChange to indicate that
+    /// a child was accessed.
     pub fn set_children_accessed(&mut self) {
         self.children_accessed = true;
     }
+    /// Set the children accessed flag in this UiElementChange to indicate that
+    /// a child was not accessed.
     pub fn clear_children_accessed(&mut self) {
         self.children_accessed = false;
     }
 
+    /// Append a [UiChildOperations] to this UiElementChange's set of child
+    /// operations.
     pub fn add_operation(&mut self, op: UiChildOperations) {
         self.child_operations.push(op);
     }
+    /// Take the Vec<[UiChildOperations]> from this UiElementChange,
+    /// leaving an empty Vec in its place.
     pub fn take_operations(&mut self) -> Vec<UiChildOperations> {
         let mut taken = Vec::new();
         mem::swap(&mut self.child_operations, &mut taken);

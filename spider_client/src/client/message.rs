@@ -13,11 +13,19 @@ pub enum ClientControl {
     Terminate,
 }
 
+/// The ClientResponse enum represents the possible responses that may be
+/// returned from a [ClientChannel]. It includes messages,
+/// but also connection events.
 #[derive(Debug, Clone)]
 pub enum ClientResponse {
+    /// The peripheral has recieved a message from the base.
     Message(Message),
+    /// The peripheral has connected to the base.
     Connected,
+    /// The peripheral has disconnected from the base.
     Disconnected,
+    /// The connection was terminated, the current state is returned.
     Terminated(SpiderClientBuilder),
+    /// The connection was denied by the base, the current state is returned.
     Denied(SpiderClientBuilder),
 }

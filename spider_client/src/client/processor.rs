@@ -113,6 +113,7 @@ impl SpiderClientProcessor {
                                             return;
                                         }
                                         if let Message::Router(RouterMessage::ChordAddrs(addrs)) = &msg {
+                                            println!("RECVD CHORD ADDRS: {:?}", addrs);
                                             processor.state.chord_addrs = addrs.clone();
                                             processor.save_state();
                                         }

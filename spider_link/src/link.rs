@@ -1,4 +1,11 @@
 
+//! The Link module manages the actual creation of the basic connection
+//! between any two nodes on the spider network.
+//! 
+//! The Link also provides encryption and serialization to the
+//! [Messages](Message) that are sent through it.
+
+
 use std::{io::ErrorKind, sync::Arc};
 
 use chacha20poly1305::{Key, Nonce, ChaCha20Poly1305, KeyInit, aead::{OsRng, Aead}};
@@ -22,6 +29,9 @@ use tokio::{
 use tracing::{error, info};
 
 use crate::{message::{Frame, Message, Protocol, KeyRequest}, SelfRelation, Relation};
+
+/// A Link is the connection between two nodes of the network.
+/// It sends and recieves [Messages](Message), and is encrypted.
 #[derive(Debug)]
 pub struct Link{
 	self_relation: SelfRelation,
@@ -35,6 +45,9 @@ pub struct Link{
 }
 
 impl Link{
+	/// Establish a connection between two nodes. This requires the
+	/// SelfRelation of the local node, and the IP Address and
+	/// relation of the remote node.
 	pub async fn connect<A: ToSocketAddrs>(own_relation: SelfRelation, addr: A, relation: Relation) -> Option<Self>{
 		if let Ok(connection) = TcpStream::connect(addr).await {
 			let mut lb = LinkBuilder::from_stream(own_relation, connection);
@@ -57,7 +70,10 @@ impl Link{
 		None
 	}
 
-	// Listener:
+	/// Listen for incoming Links with a SelfRelation and a bind address.
+	/// Returns both a channel through which new Links will be sent, and a
+	/// Mutex to control if this listener will respond to queries of its
+	/// private key.
 	pub fn listen<A: ToSocketAddrs + Send + 'static>(own_relation: SelfRelation, listen_addr: A) -> (Receiver<Link>, Arc<Mutex<Option<String>>>)
 		{
 		let (tx, rx) = channel(50);
@@ -104,6 +120,7 @@ impl Link{
 		(rx, kr_ret)
 	}
 
+	/// Request the private key of a link listener at an IP address.
 	pub async fn key_request<A: ToSocketAddrs + Send + 'static>(addr: A) -> Option<KeyRequest>{
 		let mut sock = match TcpStream::connect(addr).await {
 			Ok(sock) => sock,
@@ -119,18 +136,22 @@ impl Link{
 		key.ok()
 	}
 
+	/// Returns the SelfRelation of this Link
 	pub fn self_relation(&self) -> &SelfRelation{
 		&self.self_relation
 	}
 
+	/// Returns the remote Relation of this Link
 	pub fn other_relation(&self) -> &Relation{
 		&self.other_relation
 	}
 
+	/// Sends a Message through the link
 	pub async fn send(&self, msg: Message) -> Result<(), SendError<Message>>{
 		self.out_tx.send(msg).await
 	}
 
+	/// Recieves a Message from the Link, if the reciever has not been taken
 	pub async fn recv(&mut self) -> Option<Message>{
 		match &mut self.in_rx{
 			Some(in_rx) => in_rx.recv().await,
@@ -138,10 +159,14 @@ impl Link{
 		}	
 	}
 
+	/// Take the recieving channel from this link if it has not already been
+	/// taken. This can be used to process sending and recieving on
+	/// different threads or tasks.
 	pub fn take_recv(&mut self) -> Option<Receiver<Message>>{
 		self.in_rx.take()
 	}
 
+	/// Terminates the Link in both directions
 	pub async fn terminate(self){
 		self.notify_exit.notify_waiters();
 		self.handle.await;

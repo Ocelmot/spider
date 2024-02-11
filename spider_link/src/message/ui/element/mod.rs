@@ -26,6 +26,8 @@ pub use reference::UiElementRef;
 
 use crate::message::{AbsoluteDatasetPath, DatasetData};
 
+/// A UiElement is a portion of a UiPage, they are arranged as nodes in a tree
+/// to represent the layout of the page.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiElement {
     kind: UiElementKind,
@@ -43,29 +45,47 @@ pub struct UiElement {
     changes: UiElementChangeSet,
 }
 
+/// A [UiElement] can be one of several variants, to represent different kinds
+/// of element that can be layed out on the page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiElementKind {
+    /// Do not render anything
     None,
 
     // Layout
+    /// Do not render anything, this represents a place where extra horizontal
+    /// space on a line can be allocated.
     Spacer,
+    /// The children of this [UiElement] will be arranged vertically next to
+    /// each other.
     Columns,
+    /// The children of this [UiElement] will be arranged horizontally next to
+    /// each other.
     Rows,
+    /// Unimplemented, would have arranged elements into a fixed grid of the
+    /// specified dimensions
     Grid(u8, u8),
 
     // Output
+    /// Larger text size used for this element
     Header,
+    /// Standard text
     Text,
 
     // Input
+    /// A text box used for recieving a text input from the user
     TextEntry,
+    /// A button used for recieving a click input from the user
     Button,
 
     // Misc
+    /// The kind of this element is determined by the text in the resolved
+    /// [UiElementContentPart]. This allows the type to be set dynamically.
     Variable(UiElementContentPart),
 }
 
 impl UiElementKind{
+    /// Returns if this [UiElementKind] is selectable by default
     pub fn selectable(&self) -> bool {
         match self{
             UiElementKind::None => false,
@@ -81,6 +101,8 @@ impl UiElementKind{
         }
     }
 
+    /// Resolve references in this UiElement's [UiElementContent] using the
+    /// provided [DatasetData]
     pub fn resolve(self, datum: &Option<&DatasetData>) -> UiElementKind{
         match datum{
             Some(datum) => {
@@ -109,6 +131,7 @@ impl UiElementKind{
 }
 
 impl UiElement {
+    /// Create a new UiElement of the specified kind.
     pub fn new(kind: UiElementKind) -> Self {
         let selectable = kind.selectable();
         Self {
@@ -127,6 +150,7 @@ impl UiElement {
         }
     }
 
+    /// Create a new text UiElement using the provided string.
     pub fn from_string<S>(string: S) -> Self
     where
         S: Into<String>,
@@ -148,32 +172,43 @@ impl UiElement {
     }
 
     // Accessors, etc.
+    /// Return a reference to the [UiElementKind] of this UiElement.
     pub fn kind(&self) -> &UiElementKind{
         &self.kind
     }
+    /// Change the [UiElementKind] of this UiElement.
     pub fn set_kind(&mut self, kind: UiElementKind){
         self.kind = kind;
     }
 
+    /// Return a reference to the id of this UiElement.
     pub fn id(&self) -> Option<&String>{
         self.id.as_ref()
     }
+    /// Change the id of this UiElement.
     pub fn set_id<S>(&mut self, id: S) 
     where
         S: Into<String>,
     {
         self.id = Some(id.into());
     }
+
+    /// Has this UiElement been set as selectable?
     pub fn selectable(&self)->bool{
         self.selectable
     }
+    /// Set whether the UiElement is selectable or not
     pub fn set_selectable(&mut self, selectable: bool){
         self.selectable = selectable;
     }
 
+    /// Get a text representation of the content of this UiElement.
+    /// If the content has references to datasets, they will be unresolved.
     pub fn text(&self) -> String {
         self.content.to_string()
     }
+    /// Set the content of this UiElement to a single bit of text as provided
+    /// by the string parameter.
     pub fn set_text<S>(&mut self, text: S)
     where
     S: Into<String>,
@@ -181,21 +216,29 @@ impl UiElement {
         self.content = UiElementContent::new_text(text.into());
     }
 
+    /// Set the content of this UiElement to the provided [UiElementContent].
     pub fn set_content(&mut self, content: UiElementContent){
         self.content = content;
     }
 
+    /// Get a reference to the [AbsoluteDatasetPath] used by this UiElement.
     pub fn dataset(&self) -> &Option<AbsoluteDatasetPath>{
         &self.dataset
     }
+    /// Change the dataset used to generate virtual children from the template.
     pub fn set_dataset(&mut self, dataset: Option<AbsoluteDatasetPath>){
         self.dataset = dataset;
     }
 
     // Content operations
+    /// Return a String of the content of this UiElement, resolving any
+    /// references to data with the provided [DatasetData]
     pub fn render_content(&self, data: &DatasetData) -> String {
         self.content.resolve(data)
     }
+    /// Return a String of the content of this UiElement, resolving any
+    /// references to data with the provided Option<[DatasetData]> if it is
+    /// Some. If it is None, renders with reference placeholders. E.g. <name>
     pub fn render_content_opt(&self, data: &Option<&DatasetData>) -> String {
         match data {
             Some(data) => {
@@ -208,6 +251,7 @@ impl UiElement {
     }
 
     // Child operations
+    /// Returns a reference to the child at the given index of this UiElement.
     pub fn get_child<'a>(&'a self, index: usize) -> Option<&'a UiElement> {
         match &self.children{
             Some(children) => children.get(index),
@@ -215,6 +259,8 @@ impl UiElement {
         }
     }
 
+    /// Returns a mutable reference to the child at the given index of this
+    /// UiElement.
     pub fn get_child_mut<'a>(&'a mut self, index: usize) -> Option<&'a mut UiElement> {
         match &mut self.children{
             Some(children) => {
@@ -224,6 +270,7 @@ impl UiElement {
         }
     }
 
+    /// Returns an iterator of this UiElement's children.
     pub fn children(&self) -> std::slice::Iter<UiElement> {
         match &self.children{
             Some(children) => children.iter(),
@@ -231,6 +278,7 @@ impl UiElement {
         }
     }
 
+    /// Returns a mutable iterator of this UiElement's children.
     pub fn children_mut(&mut self) -> std::slice::IterMut<UiElement> {
         match &mut self.children {
             Some(c) => {
@@ -241,10 +289,16 @@ impl UiElement {
         }
     }
 
+    /// Returns an iterator over this UiElement's children using the data map.
+    /// This iterator yields a triplet of
+    /// (Option<usize>, &'a UiElement, Option<&'a [DatasetData]>).
+    /// This allows iteration over elements, while providing the correct
+    /// [DatasetData] to resolve the UiElement.
     pub fn children_dataset<'a>(&'a self, data: &'a Option<&DatasetData>, data_map: &'a HashMap<AbsoluteDatasetPath, Vec<DatasetData>>) -> UiElementDatasetIterator{
         UiElementDatasetIterator::new(&self, data, data_map)
     }
 
+    /// Insert a UiElement into this UiElement as a child at the provided index.
     pub fn insert_child(&mut self, index: usize, child: UiElement){
         match &mut self.children {
             Some(children) => {
@@ -257,6 +311,8 @@ impl UiElement {
             },
         }
     }
+
+    /// Insert a UiElement into this UiElement as a child as the last child.
     pub fn append_child(&mut self, child: UiElement){
         let index = match &self.children{
             Some(children) => children.len(),
@@ -264,6 +320,7 @@ impl UiElement {
         };
         self.insert_child(index, child);
     }
+    /// Remove the child UiElement at the provided index from this UiElement.
     pub fn delete_child(&mut self, index: usize){
         match &mut self.children {
             Some(children) => {
@@ -274,10 +331,15 @@ impl UiElement {
     }
 
     // Change management operations
+    /// Take all the accrued changes as a [UiElementChangeSet], leaving the
+    /// UiElement with no recorded changes.
     pub fn take_changes(&mut self) -> UiElementChangeSet{
         std::mem::take(&mut self.changes)
     }
 
+    /// Apply a [UiElementChangeSet] to this UiElement. A mutable reference to
+    /// an [UpdateSummary] must be provided, and will contain the net changes
+    /// to dataset subscriptions.
     pub fn apply_update(&mut self, mut update: UiElementUpdate, summary: &mut UpdateSummary){
         // if node was changed, assign values to self
         if let Some(node_changes) = update.take_element(){

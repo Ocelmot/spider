@@ -258,6 +258,7 @@ impl RouterProcessorState {
                         let mut messages = Vec::with_capacity(self.chord_subscribers.len());
                         for (rel, limit) in &self.chord_subscribers{
                             let x: Vec<String> = self.chord_addrs.iter().take(*limit).map(|(x, _)|{x.clone()}).collect();
+                            println!("Sending Chord Subscription: {:?}", x);
                             let msg = Message::Router(RouterMessage::ChordAddrs(x));
                             messages.push((rel.clone(), msg));
                         }
@@ -413,6 +414,7 @@ impl RouterProcessorState {
 
             // Chord Connected Messages
             RouterMessage::SubscribeChord(limit) => {
+                println!("===== Subscribing to chord!");
                 self.chord_subscribers.insert(rel.clone(), limit);
                 let x: Vec<String> = self.chord_addrs.iter().take(limit).map(|(x, _)|{x.clone()}).collect();
                 let msg = Message::Router(RouterMessage::ChordAddrs(x));

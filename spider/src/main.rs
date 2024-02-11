@@ -1,3 +1,40 @@
+#![deny(missing_docs)]
+
+//! The Spider application serves as the base for the Spider network.
+//! 
+//! It coordinates communication between the members of the network that
+//! connect to it, in order to provide various digital services. It is able to 
+//! host these services without the need for a centralized third party host.
+//! Services that are not shared between users are provided by the base, while
+//! services that require communication between many users are provided by
+//! each involved user's base. This should provide sufficient computational
+//! power for most services we expect from the internet today, with few
+//! exceptions.
+//! 
+//! These connections fall into two broad categories: Peers
+//! and Peripherals. Peers represent connections to other bases used by other
+//! users. 
+//! Peripherals are connections to devices or services under the same ownership
+//! as the base. Peripherals can also be further categorized into the following
+//! categories. 
+//! - A Service is a peripheral that executes as a subprocess of the base, and 
+//! therefore on the same hardware. This can help minimize setup and
+//! configuration for these kinds of peripherals. It is the only type of
+//! peripheral that is automatically paired to the base.
+//! - An Application peripheral executes on a device that also executes other
+//! user software. E.g. personal computers or mobile devices. These peripherals
+//! may use the base's UI or provide thier own.
+//! - A UI Peripheral is an application peripheral that specializes in
+//! displaying UI pages on behalf of the base. This could be either on a
+//! personal computer or a mobile device.
+//! - A Standalone peripheral executes on its own device. E.g IOT type devices.
+//! As these devices are typicall headless or have limited UI capabilities,
+//! they can register a UI page with the base to be displayed through the
+//! base's interface.
+//! - A Satelite peripheral is a standalone peripheral that does not register
+//! a UI page or recieve messages. It only sends messages to the base. E.g.
+//! some type of low power probe or sensor.
+
 /// included libraries
 use std::{env, io::{self, ErrorKind}, path::{Path, PathBuf}, time::Duration};
 

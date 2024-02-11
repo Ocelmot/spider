@@ -1,3 +1,7 @@
+//! The Beacon functionality allows peripherals to find a base on the
+//! local network by broadcasting a probe. The response allows the
+//! peripheral to find the address of the base.
+
 use std::time::Duration;
 
 use tokio::{
@@ -5,6 +9,9 @@ use tokio::{
     time::{timeout, Instant},
 };
 
+/// Broadcast a request over the local network for any base that is
+/// listening. The IP address of the first response recieved is returned.
+/// This function will timeout after 10 seconds.
 pub async fn beacon_lookout_one() -> Option<String> {
     let socket = UdpSocket::bind("0.0.0.0:1929").await.unwrap();
     beacon_probe_send(&socket).await;
@@ -22,6 +29,10 @@ pub async fn beacon_lookout_one() -> Option<String> {
     None
 }
 
+/// Broadcast a request over the local network for any base that is
+/// listening. Returns a Vec of the IP addresses of the responses
+/// recieved during the time limit.
+/// This function will timeout after the given Duration.
 pub async fn beacon_lookout_many(limit: Duration) -> Vec<String> {
     let socket = UdpSocket::bind("0.0.0.0:1929").await.unwrap();
     beacon_probe_send(&socket).await;
