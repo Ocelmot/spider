@@ -1,9 +1,9 @@
 use std::io::Error;
-use std::path::PathBuf;
 use std::{path::Path, time::Duration};
 
-use spider_link::Keyfile;
 use spider_link::message::Message;
+use spider_link::Keyfile;
+use tokio::fs;
 use tokio::{
     sync::mpsc::{channel, Receiver},
     task::{JoinError, JoinHandle},
@@ -12,15 +12,15 @@ use tokio::{
 
 use crate::{config::SpiderConfig, state_data::StateData};
 
-mod sender;
-use sender::ProcessorSender;
+mod link;
+use link::ProcessorLink;
 
 mod listener;
 use listener::ListenerProcessor;
 
 mod router;
-use router::RouterProcessor;
 pub use router::ChordState;
+use router::RouterProcessor;
 
 mod message;
 use message::ProcessorMessage;
@@ -34,11 +34,14 @@ use peripherals::PeripheralsProcessor;
 mod dataset;
 use dataset::DatasetProcessor;
 
+mod group;
+use group::GroupProcessor;
+
 use self::dataset::DatasetProcessorMessage;
+use self::group::GroupProcessorMessage;
 use self::listener::ListenProcessorMessage;
 use self::peripherals::PeripheralProcessorMessage;
 use self::router::RouterProcessorMessage;
-
 
 pub struct ProcessorBuilder {
     config: Option<SpiderConfig>,
@@ -101,7 +104,7 @@ impl ProcessorBuilder {
 struct Processor {
     state: StateData,
     config: SpiderConfig,
-    sender: ProcessorSender,
+    sender: ProcessorLink,
     receiver: Receiver<ProcessorMessage>,
 
     listener: ListenerProcessor,
@@ -109,6 +112,7 @@ struct Processor {
     peripherals: PeripheralsProcessor,
     ui: UiProcessor,
     dataset_processor: DatasetProcessor,
+    group_processor: GroupProcessor,
 
     print_msg: bool,
 
@@ -119,7 +123,7 @@ impl Processor {
     fn new(config: SpiderConfig, state: StateData) -> Self {
         // create channel
         let (sender, receiver) = channel(500);
-        let sender = ProcessorSender::new(sender);
+        let sender = ProcessorLink::new(config.clone(), state.clone(), sender);
 
         // start listener
         let listener = ListenerProcessor::new(config.clone(), state.clone(), sender.clone());
@@ -134,7 +138,11 @@ impl Processor {
         let ui = UiProcessor::new(config.clone(), state.clone(), sender.clone());
 
         // start datasets
-        let dataset_processor = DatasetProcessor::new(config.clone(), state.clone(), sender.clone());
+        let dataset_processor =
+            DatasetProcessor::new(config.clone(), state.clone(), sender.clone());
+
+        // start groups
+        let group_processor = GroupProcessor::new(config.clone(), state.clone(), sender.clone());
 
         // start upkeep interval
         let update_channel = sender.clone();
@@ -158,6 +166,7 @@ impl Processor {
             peripherals,
             ui,
             dataset_processor,
+            group_processor,
 
             print_msg: false,
 
@@ -170,6 +179,10 @@ impl Processor {
 
         // start processing
         let handle = tokio::spawn(async move {
+            let id = self.state.self_id().await.to_base64();
+            fs::write("./id.base64", id).await.expect("failed to write id file");
+
+
             if let Some(path) = &self.config.keyfile_path {
                 let id = self.state.self_id().await;
                 let kf = Keyfile::new(id, None);
@@ -183,7 +196,7 @@ impl Processor {
                 header: String::from("System"),
                 title: id,
                 inputs: vec![],
-                cb: |_, _, _, _|{None},
+                cb: |_, _, _, _| None,
                 data: String::new(),
             };
             self.ui.send(msg).await;
@@ -193,7 +206,7 @@ impl Processor {
                 header: String::from("System"),
                 title: String::from("Exit!"),
                 inputs: vec![("button".to_string(), "Exit".to_string())],
-                cb: |idx, title, input, _|{
+                cb: |idx, title, input, _| {
                     std::process::exit(0);
                 },
                 data: String::new(),
@@ -201,11 +214,26 @@ impl Processor {
             self.ui.send(msg).await;
 
             // init setting headers to set the order
-            self.ui.send(UiProcessorMessage::SetSettingHeader { header: "Pending Connections".into() }).await;
-            self.ui.send(UiProcessorMessage::SetSettingHeader { header: "Peripheral Services".into() }).await;
-            self.ui.send(UiProcessorMessage::SetSettingHeader { header: "Connected Chords".into() }).await;
-            self.ui.send(UiProcessorMessage::SetSettingHeader { header: "Directory".into() }).await;
-
+            self.ui
+                .send(UiProcessorMessage::SetSettingHeader {
+                    header: "Pending Connections".into(),
+                })
+                .await;
+            self.ui
+                .send(UiProcessorMessage::SetSettingHeader {
+                    header: "Peripheral Services".into(),
+                })
+                .await;
+            self.ui
+                .send(UiProcessorMessage::SetSettingHeader {
+                    header: "Connected Chords".into(),
+                })
+                .await;
+            self.ui
+                .send(UiProcessorMessage::SetSettingHeader {
+                    header: "Directory".into(),
+                })
+                .await;
 
             loop {
                 let message = self.receiver.recv().await;
@@ -221,36 +249,40 @@ impl Processor {
                 };
 
                 match message {
-                    ProcessorMessage::RemoteMessage(relation, message) => {
-                        match message {
-                            Message::Ui(msg) => {
-                                self.ui
-                                    .send(UiProcessorMessage::RemoteMessage(relation, msg))
-                                    .await.unwrap();
-                            }
-                            Message::Dataset(msg) => {
-                                self.dataset_processor
-                                    .send(DatasetProcessorMessage::PublicMessage(relation, msg))
-                                    .await;
-                            },
-                            Message::Router(msg) => {
-                                self.router
-                                    .send(RouterProcessorMessage::PeripheralMessage(relation, msg))
-                                    .await;
-                            },
-                            Message::Error(_) => { },
+                    ProcessorMessage::RemoteMessage(relation, message) => match message {    
+                        Message::Ui(msg) => {
+                            self.ui
+                                .send(UiProcessorMessage::RemoteMessage(relation, msg))
+                                .await
+                                .unwrap();
                         }
-                    }
+                        Message::Dataset(msg) => {
+                            self.dataset_processor
+                                .send(DatasetProcessorMessage::PublicMessage(relation, msg))
+                                .await;
+                        }
+                        Message::Router(msg) => {
+                            self.router
+                                .send(RouterProcessorMessage::PeripheralMessage(relation, msg))
+                                .await;
+                        }
+                        Message::Group(msg) => {
+                            self.group_processor
+                                .send(GroupProcessorMessage::PublicMessage(relation, msg))
+                                .await;
+                        }
+                        Message::Error(_) => {}
+                    },
                     ProcessorMessage::ListenerMessage(msg) => {
                         self.listener.send(msg).await;
-                    },
+                    }
                     ProcessorMessage::RouterMessage(msg) => {
                         self.router.send(msg).await;
                     }
                     ProcessorMessage::UiMessage(msg) => {
                         self.ui.send(msg).await;
                     }
-                    
+
                     ProcessorMessage::DatasetMessage(msg) => {
                         self.dataset_processor.send(msg).await;
                     }
@@ -261,9 +293,14 @@ impl Processor {
                     ProcessorMessage::Upkeep => {
                         self.listener.send(ListenProcessorMessage::Upkeep).await;
                         self.ui.send(UiProcessorMessage::Upkeep).await;
-                        self.dataset_processor.send(DatasetProcessorMessage::Upkeep).await;
+                        self.dataset_processor
+                            .send(DatasetProcessorMessage::Upkeep)
+                            .await;
                         self.router.send(RouterProcessorMessage::Upkeep).await;
-                        self.peripherals.send(PeripheralProcessorMessage::Upkeep).await;
+                        self.peripherals
+                            .send(PeripheralProcessorMessage::Upkeep)
+                            .await;
+                        self.group_processor.send(GroupProcessorMessage::Upkeep).await;
                         self.state.save_file().await;
                     }
                 }
@@ -275,7 +312,7 @@ impl Processor {
 }
 
 pub struct ProcessorHandle {
-    sender: ProcessorSender,
+    sender: ProcessorLink,
     handle: JoinHandle<()>,
 }
 

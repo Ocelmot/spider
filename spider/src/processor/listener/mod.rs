@@ -8,7 +8,7 @@ use crate::{config::SpiderConfig, state_data::StateData};
 use spider_link::link::Link;
 
 use super::router::RouterProcessorMessage;
-use super::sender::ProcessorSender;
+use super::link::ProcessorLink;
 
 mod beacon;
 mod message;
@@ -21,7 +21,7 @@ pub struct ListenerProcessor {
 }
 
 impl ListenerProcessor {
-    pub fn new(config: SpiderConfig, state: StateData, sender: ProcessorSender) -> Self {
+    pub fn new(config: SpiderConfig, state: StateData, sender: ProcessorLink) -> Self {
         // start beacon
         let beacon = beacon::start_beacon(&config);
 
@@ -50,7 +50,7 @@ impl ListenerProcessor {
 struct ListenProcessorState {
     config: SpiderConfig,
     state: StateData,
-    sender: ProcessorSender,
+    sender: ProcessorLink,
     receiver: Receiver<ListenProcessorMessage>,
 }
 
@@ -58,7 +58,7 @@ impl ListenProcessorState {
     pub fn new(
         config: SpiderConfig,
         state: StateData,
-        sender: ProcessorSender,
+        sender: ProcessorLink,
         receiver: Receiver<ListenProcessorMessage>,
     ) -> Self {
         Self {

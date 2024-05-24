@@ -4,3 +4,5 @@
 *.dat
 /spider/datasets
 /spider/peripherals
+/spider/groups
+*.base64

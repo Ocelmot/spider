@@ -14,7 +14,7 @@ use tokio::{
 };
 
 use crate::processor::{
-    message::ProcessorMessage, sender::ProcessorSender, ui::UiProcessorMessage,
+    message::ProcessorMessage, link::ProcessorLink, ui::UiProcessorMessage,
 };
 
 use super::{RouterProcessorMessage, RouterProcessorState};
@@ -135,7 +135,7 @@ pub enum PendingLinkControl {
 }
 
 fn pending_link_processor(
-    sender: ProcessorSender,
+    sender: ProcessorLink,
     mut link: Link,
     mut codes: HashSet<String>,
     mut should_approve_ui: Arc<watch::Sender<bool>>,
@@ -251,7 +251,7 @@ fn pending_link_processor(
     tx
 }
 
-async fn approve_link(mut sender: ProcessorSender, link: Link, backlog: Vec<Message>) {
+async fn approve_link(mut sender: ProcessorLink, link: Link, backlog: Vec<Message>) {
     // Send approved link to link
     link.send(Message::Router(RouterMessage::Approved)).await;
 
@@ -278,7 +278,7 @@ async fn approve_link(mut sender: ProcessorSender, link: Link, backlog: Vec<Mess
     }
 }
 
-async fn deny_link(mut sender: ProcessorSender, link: Link) {
+async fn deny_link(mut sender: ProcessorLink, link: Link) {
     link.send(Message::Router(RouterMessage::Denied)).await;
 
     // update settings page

@@ -1,7 +1,6 @@
-use std::{time::Duration, collections::HashSet};
+use std::collections::HashSet;
 
 use spider_link::{Relation, message::{DatasetData, RouterMessage, Message}};
-use tokio::time::Instant;
 
 use super::RouterProcessorState;
 
@@ -18,41 +17,9 @@ impl RouterProcessorState{
                 continue; // this recipient already recieved message via subscription
             }
             println!("Sending message to external...");
-            match self.links.get_mut(&external){
-                Some(link) => {
-                    // send to already-connected link
-                    println!("Link is connected");
-                    let router_msg = RouterMessage::Event(name.clone(), from.clone(), data.clone());
-                    let msg = Message::Router(router_msg);
-                    link.send(msg).await;
-                    println!("Sent");
-                },
-                None => {
-                    // insert into pending links
-                    println!("Link is pending");
-                    match self.pending_links.get_mut(&external) {
-                        Some((_, tries, pending_msgs)) => {
-                            println!("adding message to entry");
-                            let router_msg = RouterMessage::Event(name.clone(), from.clone(), data.clone());
-                            let msg = Message::Router(router_msg);
-                            pending_msgs.push(msg);
-                            *tries = 0;
-                        },
-                        None => {
-                            // not already in, need to init connection requests
-                            println!("new pending entry");
-                            let router_msg = RouterMessage::Event(name.clone(), from.clone(), data.clone());
-                            let msg = Message::Router(router_msg);
-                            let pending_msgs = vec![msg];
-                            let mut t = Instant::now();
-                            t = t - Duration::from_secs(600);
-                            self.pending_links.insert(external.clone(), (t, 0u8, pending_msgs));
-                            // start connection process
-                            self.process_pending_link(external).await;
-                        },
-                    }
-                },
-            }
+            let router_msg = RouterMessage::Event(name.clone(), from.clone(), data.clone());
+            let msg = Message::Router(router_msg);
+            self.send_msg(external, msg).await;
         }
     }
 
@@ -66,6 +33,11 @@ impl RouterProcessorState{
 
 // Helper functions
 impl RouterProcessorState{
+    /// Forwards an event (a name and data) from some relation to active links
+    /// that have subscribed to events with that name.
+    /// Skips events from an external source and external subscriber to
+    /// avoid routing events that do not have to do with us.
+    /// Returns a set of relations to which the event was sent.
     async fn event_to_subscribers(&mut self, name: &String, from: &Relation, data: &DatasetData) -> HashSet<Relation>{
         let mut recipients = HashSet::new();
         if let Some(subscriber_set) = self.event_subscribers.get(name){

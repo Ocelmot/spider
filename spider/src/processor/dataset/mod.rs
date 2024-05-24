@@ -6,7 +6,7 @@ use std::{
 
 use crate::{config::SpiderConfig, state_data::StateData};
 
-use super::{sender::ProcessorSender, ui::UiProcessorMessage};
+use super::{link::ProcessorLink, ui::UiProcessorMessage};
 
 mod message;
 pub use message::DatasetProcessorMessage;
@@ -16,7 +16,7 @@ use spider_link::{
     Relation, SpiderId2048,
 };
 use tokio::{
-    fs::{File, OpenOptions, create_dir_all},
+    fs::{OpenOptions, create_dir_all},
     io::{AsyncReadExt, AsyncWriteExt},
     sync::mpsc::{channel, error::SendError, Receiver, Sender},
     task::{JoinError, JoinHandle},
@@ -34,7 +34,7 @@ pub(crate) struct DatasetProcessor {
 }
 
 impl DatasetProcessor {
-    pub fn new(config: SpiderConfig, state: StateData, sender: ProcessorSender) -> Self {
+    pub fn new(config: SpiderConfig, state: StateData, sender: ProcessorLink) -> Self {
         let (dataset_sender, dataset_receiver) = channel(50);
         let processor = DatasetProcessorState::new(config, state, sender, dataset_receiver);
         let handle = processor.start();
@@ -59,7 +59,7 @@ impl DatasetProcessor {
 pub(crate) struct DatasetProcessorState {
     config: SpiderConfig,
     state: StateData,
-    sender: ProcessorSender,
+    sender: ProcessorLink,
     receiver: Receiver<DatasetProcessorMessage>,
 
     subscriptions: HashMap<AbsoluteDatasetPath, HashSet<DatasetSubscriber>>,
@@ -69,7 +69,7 @@ impl DatasetProcessorState {
     pub fn new(
         config: SpiderConfig,
         state: StateData,
-        sender: ProcessorSender,
+        sender: ProcessorLink,
         receiver: Receiver<DatasetProcessorMessage>,
     ) -> Self {
         Self {

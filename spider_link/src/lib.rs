@@ -1,14 +1,13 @@
 #![deny(missing_docs)]
 
-
 //! The spider_link crate encapsulates everything realated to esablishing
 //! a link between any two members of the spider network.
-//! 
+//!
 //! To develop a peripheral for the spider network, use the spider_client
 //! crate. That crate includes this crate, re-exports the needed types and
 //! functions, and adds useful functionality around finding and
 //! reestablishing connections.
-//! 
+//!
 //! There are two broad categories of connection: the Peer, and the Peripheral.
 //! A Peer connection represents a link from one base to another base.
 //! The primary use for this is to send data, as much of the other
@@ -16,8 +15,7 @@
 //! A Peripheral connection represents a connection to a process that is
 //! closely associated with the base. This could be an embedded device or
 //! a mobile app used to interface with the base. These types of
-//! connections are trusted. 
-
+//! connections are trusted.
 
 use std::sync::Arc;
 
@@ -27,12 +25,15 @@ use rsa::{
     RsaPrivateKey,
 };
 use serde::{Deserialize, Serialize};
-use tokio::{net::ToSocketAddrs, sync::{mpsc::Receiver, Mutex}};
+use tokio::{
+    net::ToSocketAddrs,
+    sync::{mpsc::Receiver, Mutex},
+};
 
 pub mod link;
 pub use link::Link;
-pub mod message;
 pub mod id;
+pub mod message;
 use id::SpiderId;
 pub mod beacon;
 mod keyfile;
@@ -67,21 +68,37 @@ pub struct Relation {
     pub id: SpiderId2048,
 }
 
-impl Relation{
+impl Relation {
+    /// Creates a new relation from an id with [Role::Peer]
+    pub fn peer_from_id(id: SpiderId2048) -> Self {
+        Self {
+            role: Role::Peer,
+            id,
+        }
+    }
+
+    /// Creates a new relation from an id with [Role::Peripheral]
+    pub fn peripheral_from_id(id: SpiderId2048) -> Self {
+        Self {
+            role: Role::Peripheral,
+            id,
+        }
+    }
+
     /// Returns true of this relation represents a peripheral
-    pub fn is_peripheral(&self) -> bool{
-        if let Role::Peripheral = self.role{
+    pub fn is_peripheral(&self) -> bool {
+        if let Role::Peripheral = self.role {
             true
-        }else{
+        } else {
             false
         }
     }
 
     /// Returns true if this relation represents a peer
-    pub fn is_peer(&self) -> bool{
-        if let Role::Peer = self.role{
+    pub fn is_peer(&self) -> bool {
+        if let Role::Peer = self.role {
             true
-        }else{
+        } else {
             false
         }
     }
@@ -99,57 +116,50 @@ impl Relation{
 
     /// Optionally returns a Relation from a decoded base64 string
     pub fn from_base64(s: String) -> Option<Self> {
-        match general_purpose::URL_SAFE_NO_PAD.decode(s){
+        match general_purpose::URL_SAFE_NO_PAD.decode(s) {
             Ok(mut v) => {
                 let role = match v.pop()? {
                     0 => Role::Peer,
                     1 => Role::Peripheral,
                     _ => return None,
                 };
-                let bytes= match v.try_into() {
+                let bytes = match v.try_into() {
                     Ok(bytes) => bytes,
                     Err(_) => return None,
                 };
                 let id = SpiderId2048::from_bytes(bytes);
-                Some(Self {
-                    role,
-                    id
-                })
-            },
+                Some(Self { role, id })
+            }
             Err(_) => None,
         }
     }
 
     /// Optionally returns a relation from an id from a base64 encoded
     /// string, and a role of peripheral.
-    pub fn peripheral_from_base_64<S: Into<String>>(s: S) -> Option<Self>{
+    pub fn peripheral_from_base_64<S: Into<String>>(s: S) -> Option<Self> {
         match SpiderId2048::from_base64(s) {
-            Some(id) => {
-                Some(Self {
-                    role: Role::Peripheral,
-                    id
-                })
-            },
+            Some(id) => Some(Self {
+                role: Role::Peripheral,
+                id,
+            }),
             None => None,
         }
     }
 
     /// Optionally returns a relation from an id from a base64 encoded
     /// string, and a role of peer.
-    pub fn peer_from_base_64<S: Into<String>>(s: S) -> Option<Self>{
+    pub fn peer_from_base_64<S: Into<String>>(s: S) -> Option<Self> {
         match SpiderId2048::from_base64(s) {
-            Some(id) => {
-                Some(Self {
-                    role: Role::Peer,
-                    id
-                })
-            },
+            Some(id) => Some(Self {
+                role: Role::Peer,
+                id,
+            }),
             None => None,
         }
     }
 
     /// Returns a string with the sha256 hash of the the relation
-    pub fn sha256(&self) -> String{
+    pub fn sha256(&self) -> String {
         let role: u8 = match self.role {
             Role::Peripheral => 1,
             Role::Peer => 0,
@@ -174,7 +184,7 @@ pub struct SelfRelation {
 impl SelfRelation {
     /// Create a SelfRelation from a private key and a role
     pub fn from_key(key: RsaPrivateKey, role: Role) -> Self {
-        let priv_bytes = key.to_pkcs8_der().unwrap().as_ref().to_vec();
+        let priv_bytes = key.to_pkcs8_der().unwrap().as_bytes().to_vec();
         let pub_bytes = key.to_public_key().to_public_key_der().unwrap();
         let id = SpiderId::from_bytes(pub_bytes.as_ref().try_into().unwrap());
         Self {
@@ -211,14 +221,16 @@ impl SelfRelation {
     /// the listener to. Returns both a channel through which new [Links](Link)
     /// will be sent, and a mutex to control if this listener will respond
     /// to key requests.
-    pub fn listen<A: ToSocketAddrs + Send + 'static>(&self, addr: A) -> (Receiver<Link>, Arc<Mutex<Option<String>>>) {
+    pub fn listen<A: ToSocketAddrs + Send + 'static>(
+        &self,
+        addr: A,
+    ) -> (Receiver<Link>, Arc<Mutex<Option<String>>>) {
         Link::listen(self.clone(), addr)
     }
 }
 
-
-impl Eq for Relation{}
-impl PartialOrd for Relation{
+impl Eq for Relation {}
+impl PartialOrd for Relation {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match self.role.partial_cmp(&other.role) {
             Some(core::cmp::Ordering::Equal) => {}
@@ -227,7 +239,7 @@ impl PartialOrd for Relation{
         self.id.partial_cmp(&other.id)
     }
 }
-impl Ord for Relation{
+impl Ord for Relation {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.partial_cmp(other).unwrap() // There is no None option in partial cmp
     }

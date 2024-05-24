@@ -30,6 +30,9 @@ pub struct SpiderConfig{
     // Dataset configuration
     #[serde(default)]
     dataset_path: Option<String>,
+
+    #[serde(default)]
+    group_path: Option<String>,
 }
 
 
@@ -51,6 +54,11 @@ impl SpiderConfig {
 
     pub fn dataset_path(&self)-> PathBuf{
         let s = self.dataset_path.clone().unwrap_or(String::from("datasets"));
+        PathBuf::from(s)
+    }
+
+    pub fn group_path(&self)-> PathBuf{
+        let s = self.dataset_path.clone().unwrap_or(String::from("groups"));
         PathBuf::from(s)
     }
 }

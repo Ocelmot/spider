@@ -49,6 +49,22 @@ pub use router::{
     DirectoryEntry,
 };
 
+mod group;
+pub use group::{
+    GroupMessage,
+    GroupId,
+    GroupEvent,
+
+    ChangeAnnounce,
+    ChangeAck,
+    ChangeId,
+
+    Proposal,
+    ProposalId,
+    ProposalAction,
+    ProposalDatasetChange,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Frame {
     pub data: Vec<u8>,
@@ -77,12 +93,19 @@ pub enum Message {
     /// The message is a [UiMessage].
     /// Used to control and manage the input of a Ui page
     Ui(UiMessage),
+
     /// The message is a [DatasetMessage].
     /// Used to manage the data in the datasets
     Dataset(DatasetMessage),
+
     /// The message is a [RouterMessage].
     /// Used to route arbitrairy data to members of the network
     Router(RouterMessage),
+
+    /// The message is a [GroupMessage].
+    /// Used to synchronize the datasets of a group
+    Group(GroupMessage),
+
     /// The message is an error
     Error(String),
 }

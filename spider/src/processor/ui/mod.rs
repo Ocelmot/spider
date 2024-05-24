@@ -1,7 +1,7 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
 use spider_link::{
-    message::{Message, UiMessage, UiPageList, UiInput, AbsoluteDatasetPath, UiElementUpdate, UiPageManager, UiChildOperations, UpdateSummary, DatasetData},
+    message::{Message, UiMessage, UiPageList, UiInput, AbsoluteDatasetPath, UpdateSummary},
     Relation, Role,
 };
 use tokio::{
@@ -11,12 +11,12 @@ use tokio::{
 
 use crate::{config::SpiderConfig, state_data::StateData};
 
-use super::{sender::ProcessorSender, dataset::DatasetProcessorMessage, message::ProcessorMessage};
+use super::{link::ProcessorLink, dataset::DatasetProcessorMessage, message::ProcessorMessage};
 
 mod settings;
 
 mod message;
-pub use message::{UiProcessorMessage};
+pub use message::UiProcessorMessage;
 
 pub(crate) struct UiProcessor {
     sender: Sender<UiProcessorMessage>,
@@ -24,7 +24,7 @@ pub(crate) struct UiProcessor {
 }
 
 impl UiProcessor {
-    pub fn new(config: SpiderConfig, state: StateData, sender: ProcessorSender) -> Self {
+    pub fn new(config: SpiderConfig, state: StateData, sender: ProcessorLink) -> Self {
         let (ui_sender, ui_receiver) = channel(50);
         let processor = UiProcessorState::new(config, state, sender, ui_receiver);
         let handle = processor.start();
@@ -49,7 +49,7 @@ impl UiProcessor {
 struct UiProcessorState {
     config: SpiderConfig,
     state: StateData,
-    sender: ProcessorSender,
+    sender: ProcessorLink,
     receiver: Receiver<UiProcessorMessage>,
 
     pages: UiPageList,
@@ -75,7 +75,7 @@ impl UiProcessorState {
     fn new(
         config: SpiderConfig,
         state: StateData,
-        sender: ProcessorSender,
+        sender: ProcessorLink,
         receiver: Receiver<UiProcessorMessage>,
     ) -> Self {
         Self {

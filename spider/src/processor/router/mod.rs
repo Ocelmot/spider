@@ -4,18 +4,20 @@ use dht_chord::associate::{AssociateRequest, AssociateResponse};
 use lru::LruCache;
 use spider_link::{
     message::{Message, RouterMessage, DirectoryEntry},
-    Link, Relation, Role, SpiderId2048,
+    Link, Relation, Role,
 };
 use tokio::{
     sync::{mpsc::{channel, error::SendError, Receiver, Sender}, watch},
-    task::{JoinError, JoinHandle}, time::Instant, select,
+    task::{JoinError, JoinHandle}, time::Instant,
 };
+
+use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 
 use crate::{config::SpiderConfig, state_data::StateData};
 
 use self::{chord::ChordEntry, authorization::PendingLinkControl};
 
-use super::{message::ProcessorMessage, sender::ProcessorSender, ui::UiProcessorMessage, listener::ListenProcessorMessage};
+use super::{message::ProcessorMessage, link::ProcessorLink, ui::UiProcessorMessage, listener::ListenProcessorMessage};
 
 mod authorization;
 mod event;
@@ -32,7 +34,7 @@ pub(crate) struct RouterProcessor {
 }
 
 impl RouterProcessor {
-    pub fn new(config: SpiderConfig, state: StateData, sender: ProcessorSender) -> Self {
+    pub fn new(config: SpiderConfig, state: StateData, sender: ProcessorLink) -> Self {
         let (router_sender, router_receiver) = channel(50);
         let processor = RouterProcessorState::new(config, state, sender, router_receiver);
         let handle = processor.start();
@@ -57,7 +59,7 @@ impl RouterProcessor {
 pub(crate) struct RouterProcessorState {
     config: SpiderConfig,
     state: StateData,
-    sender: ProcessorSender,
+    sender: ProcessorLink,
     receiver: Receiver<RouterProcessorMessage>,
 
     // Link items
@@ -86,7 +88,7 @@ impl RouterProcessorState {
     pub fn new(
         config: SpiderConfig,
         state: StateData,
-        sender: ProcessorSender,
+        sender: ProcessorLink,
         receiver: Receiver<RouterProcessorMessage>,
     ) -> Self {
         let (should_approve_ui, _) = watch::channel(false);
@@ -151,6 +153,9 @@ impl RouterProcessorState {
                     }
                     RouterProcessorMessage::MulticastMessage(rels, msg) => {
                         self.multicast_msg(rels, msg).await;
+                    }
+                    RouterProcessorMessage::SomecastMessage(rels, min, msg) => {
+                        self.somecast_msg(rels, min, msg).await;
                     }
                     // ===== Chord Operations =====
                     RouterProcessorMessage::JoinChord(addr) => {
@@ -258,7 +263,7 @@ impl RouterProcessorState {
                         let mut messages = Vec::with_capacity(self.chord_subscribers.len());
                         for (rel, limit) in &self.chord_subscribers{
                             let x: Vec<String> = self.chord_addrs.iter().take(*limit).map(|(x, _)|{x.clone()}).collect();
-                            println!("Sending Chord Subscription: {:?}", x);
+                            // println!("Sending Chord Subscription: {:?}", x);
                             let msg = Message::Router(RouterMessage::ChordAddrs(x));
                             messages.push((rel.clone(), msg));
                         }
@@ -481,19 +486,77 @@ impl RouterProcessorState {
 
     async fn send_msg(&mut self, relation: Relation, msg: Message) {
         // println!("Sending message: {:?}", msg);
-        match self.links.get_mut(&relation) {
-            Some(link) => {
-                link.send(msg).await;
+        let msg = if let Some(link) = self.links.get_mut(&relation) {
+            if let Err(e) = link.send(msg).await {
+                // Connection is dead, remove the link
+                self.links.remove(&relation);
+                e.0
+            }else{
+                return;
             }
-            None => { // no link, no send at the moment (should buffer messages and start a new connection)
-                //
-            } 
+        }else{
+            msg
+        };
+
+         // no link, no send at the moment (should buffer messages and start a new connection)
+        if !self.links.contains_key(&relation) {
+            // insert into pending links
+            println!("Link is pending");
+            match self.pending_links.get_mut(&relation) {
+                Some((_, tries, pending_msgs)) => {
+                    println!("adding message to entry");
+                    pending_msgs.push(msg);
+                    *tries = 0;
+                },
+                None => {
+                    // not already in, need to init connection requests
+                    println!("new pending entry");
+                    let pending_msgs = vec![msg];
+                    let mut t = Instant::now();
+                    t = t - Duration::from_secs(600);
+                    self.pending_links.insert(relation.clone(), (t, 0u8, pending_msgs));
+                    // start connection process
+                    self.process_pending_link(relation).await;
+                },
+            }
         }
     }
 
     async fn multicast_msg(&mut self, relations: Vec<Relation>, msg: Message) {
         for relation in relations {
             self.send_msg(relation, msg.clone()).await
+        }
+    }
+
+    async fn somecast_msg(&mut self, relations: Vec<Relation>, min: usize, msg: Message) {
+        let mut connected = Vec::new();
+        let mut disconnected = Vec::new();
+        for rel in relations {
+            if self.links.contains_key(&rel) {
+                connected.push(rel);
+            } else {
+                disconnected.push(rel)
+            }
+        }
+        let mut rng = StdRng::from_rng(rand::thread_rng()).unwrap();
+        if connected.len() >= min {
+            for reciever in connected.choose_multiple(&mut rng, min){
+                if let Some(link) = self.links.get_mut(reciever) {
+                    link.send(msg.clone()).await;
+                }
+            }
+        } else {
+            let disconnected_count = min-connected.len();
+            for rel in connected {
+                if let Some(link) = self.links.get_mut(&rel) {
+                    link.send(msg.clone()).await;
+                }
+            }
+            for reciever in disconnected.choose_multiple(&mut rng, disconnected_count){
+                if let Some(link) = self.links.get_mut(reciever) {
+                    link.send(msg.clone()).await;
+                }
+            }
         }
     }
 

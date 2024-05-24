@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::{config::SpiderConfig, state_data::StateData};
 
-use super::{sender::ProcessorSender, ui::UiProcessorMessage, message::ProcessorMessage};
+use super::{link::ProcessorLink, ui::UiProcessorMessage, message::ProcessorMessage};
 
 mod message;
 pub use message::PeripheralProcessorMessage;
@@ -28,7 +28,7 @@ pub(crate) struct PeripheralsProcessor{
 }
 
 impl PeripheralsProcessor {
-    pub fn new(config: SpiderConfig, state: StateData, sender: ProcessorSender)-> Self{
+    pub fn new(config: SpiderConfig, state: StateData, sender: ProcessorLink)-> Self{
         let (peripheral_sender, peripheral_receiver) = channel(50);
         let processor = PeripheralProcessorState::new(config, state, sender, peripheral_receiver);
         let handle = processor.start();
@@ -57,7 +57,7 @@ impl PeripheralsProcessor {
 struct PeripheralProcessorState{
     config: SpiderConfig,
     state: StateData,
-    sender: ProcessorSender,
+    sender: ProcessorLink,
     receiver: Receiver<PeripheralProcessorMessage>,
 
     children: HashMap<String, Child>
@@ -67,7 +67,7 @@ impl PeripheralProcessorState{
     fn new(
         config: SpiderConfig,
         state: StateData,
-        sender: ProcessorSender,
+        sender: ProcessorLink,
         receiver: Receiver<PeripheralProcessorMessage>,
     ) -> Self {
         Self {

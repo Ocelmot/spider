@@ -47,7 +47,7 @@ impl std::fmt::Debug for UiProcessorMessage {
                 header,
                 title,
                 inputs,
-                cb,
+                cb: _,
                 data,
             } => f
                 .debug_struct("SetSetting")

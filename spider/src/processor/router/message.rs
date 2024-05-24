@@ -15,6 +15,7 @@ pub enum RouterProcessorMessage {
 
     SendMessage(Relation, Message),
     MulticastMessage(Vec<Relation>, Message),
+    SomecastMessage(Vec<Relation>, usize, Message),
 
     JoinChord(String),
     HostChord(String),

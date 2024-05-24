@@ -1,16 +1,32 @@
-use spider_link::{message::{Message, RouterMessage}, Relation};
+use spider_link::{message::Message, Relation};
 use tokio::sync::mpsc::{error::SendError, Sender};
+
+use crate::{config::SpiderConfig, state_data::StateData};
 
 use super::{message::ProcessorMessage, router::RouterProcessorMessage, ui::UiProcessorMessage, dataset::DatasetProcessorMessage};
 
 #[derive(Debug, Clone)]
-pub struct ProcessorSender {
+pub struct ProcessorLink {
+    config: SpiderConfig,
+    state: StateData,
     sender: Sender<ProcessorMessage>,
 }
 
-impl ProcessorSender {
-    pub(crate) fn new(sender: Sender<ProcessorMessage>) -> Self {
-        Self { sender }
+impl ProcessorLink {
+    pub(crate) fn new( config: SpiderConfig, state: StateData, sender: Sender<ProcessorMessage>) -> Self {
+        Self {
+            config,
+            state,
+            sender,
+        }
+    }
+
+    pub fn config(&self) -> &SpiderConfig{
+        &self.config
+    }
+
+    pub fn state(&self) -> &StateData {
+        &self.state
     }
 
     pub(crate) async fn send(&self, msg: ProcessorMessage) -> Result<(), SendError<ProcessorMessage>> {
@@ -28,13 +44,25 @@ impl ProcessorSender {
         self.sender.send(msg).await
     }
 
-    // multicast message
+    /// Send a [Message] to each of the [Relation]s
     pub(crate) async fn multicast_message(
         &mut self,
         rels: Vec<Relation>,
         msg: Message,
     ) -> Result<(), SendError<ProcessorMessage>> {
         let msg = RouterProcessorMessage::MulticastMessage(rels, msg);
+        let msg = ProcessorMessage::RouterMessage(msg);
+        self.sender.send(msg).await
+    }
+
+    // somecast message
+    pub(crate) async fn somecast_message(
+        &mut self,
+        rels: Vec<Relation>,
+        limit: usize,
+        msg: Message,
+    ) -> Result<(), SendError<ProcessorMessage>> {
+        let msg = RouterProcessorMessage::SomecastMessage(rels, limit, msg);
         let msg = ProcessorMessage::RouterMessage(msg);
         self.sender.send(msg).await
     }

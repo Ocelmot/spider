@@ -5,7 +5,7 @@ use lru::LruCache;
 use spider_link::SpiderId2048;
 use tokio::{sync::mpsc::{channel, Sender}, select};
 
-use crate::processor::{router::RouterProcessorMessage, message::ProcessorMessage, ui::UiProcessorMessage, sender::ProcessorSender};
+use crate::processor::{router::RouterProcessorMessage, message::ProcessorMessage, ui::UiProcessorMessage, link::ProcessorLink};
 
 use super::RouterProcessorState;
 
@@ -226,7 +226,7 @@ impl ChordEntry{
     }
 
     async fn start_chord(
-        processor_sender: ProcessorSender,
+        processor_sender: ProcessorLink,
         id: SpiderId2048,
         state: ChordState,
         join_or_host: bool,
@@ -267,7 +267,7 @@ impl ChordEntry{
         }
     }
     
-    fn create_addr_sender(mut associate: AssociateChannel<String, SpiderId2048>, processor_sender: ProcessorSender) -> Sender<SpiderId2048>{
+    fn create_addr_sender(mut associate: AssociateChannel<String, SpiderId2048>, processor_sender: ProcessorLink) -> Sender<SpiderId2048>{
         // Create chord processor task
         let (sender, mut receiver) = channel(50);
         let task_handle = tokio::spawn(async move {
