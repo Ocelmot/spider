@@ -1,29 +1,45 @@
-use std::{collections::{HashMap, HashSet}, time::Duration, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use dht_chord::associate::{AssociateRequest, AssociateResponse};
 use lru::LruCache;
 use spider_link::{
-    message::{Message, RouterMessage, DirectoryEntry},
+    message::{DirectoryEntry, Invite, InviteType, Message, RouterMessage},
     Link, Relation, Role,
 };
 use tokio::{
-    sync::{mpsc::{channel, error::SendError, Receiver, Sender}, watch},
-    task::{JoinError, JoinHandle}, time::Instant,
+    sync::{
+        mpsc::{channel, error::SendError, Receiver, Sender},
+        watch,
+    },
+    task::{JoinError, JoinHandle},
+    time::Instant,
 };
 
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 
 use crate::{config::SpiderConfig, state_data::StateData};
 
-use self::{chord::ChordEntry, authorization::PendingLinkControl};
+use self::{
+    authorization::PendingLinkControl,
+    chord::ChordEntry,
+    veilid::{VeilidProcessor, VeilidProcessorMessage},
+};
 
-use super::{message::ProcessorMessage, link::ProcessorLink, ui::UiProcessorMessage, listener::ListenProcessorMessage};
+use super::{
+    link::ProcessorLink, listener::ListenProcessorMessage, message::ProcessorMessage,
+    ui::UiProcessorMessage,
+};
 
 mod authorization;
-mod event;
 mod chord;
+mod event;
 pub use chord::ChordState;
 mod directory;
+mod veilid;
 
 mod message;
 pub use message::RouterProcessorMessage;
@@ -34,9 +50,9 @@ pub(crate) struct RouterProcessor {
 }
 
 impl RouterProcessor {
-    pub fn new(config: SpiderConfig, state: StateData, sender: ProcessorLink) -> Self {
+    pub async fn new(config: SpiderConfig, state: StateData, sender: ProcessorLink) -> Self {
         let (router_sender, router_receiver) = channel(50);
-        let processor = RouterProcessorState::new(config, state, sender, router_receiver);
+        let processor = RouterProcessorState::new(config, state, sender, router_receiver).await;
         let handle = processor.start();
         Self {
             sender: router_sender,
@@ -67,7 +83,7 @@ pub(crate) struct RouterProcessorState {
     approval_codes: HashMap<String, Instant>,
     incoming_links: HashMap<String, Sender<PendingLinkControl>>,
     links: HashMap<Relation, Link>,
-    
+
     pending_links: HashMap<Relation, (Instant, u8, Vec<Message>)>,
 
     // Event items
@@ -78,20 +94,28 @@ pub(crate) struct RouterProcessorState {
     chord_subscribers: HashMap<Relation, usize>,
     chord_addrs: LruCache<String, ()>,
 
+    // Veilid connection
+    veilid: Option<VeilidProcessor>,
+
     // Directory items
     directory_subscribers: HashSet<Relation>,
     directory: HashMap<Relation, DirectoryEntry>,
-
 }
 
 impl RouterProcessorState {
-    pub fn new(
+    pub async fn new(
         config: SpiderConfig,
         state: StateData,
         sender: ProcessorLink,
         receiver: Receiver<RouterProcessorMessage>,
     ) -> Self {
         let (should_approve_ui, _) = watch::channel(false);
+        let veilid = if config.veilid_enabled() {
+            VeilidProcessor::new(sender.clone()).await
+        } else {
+            None
+        };
+
         Self {
             config,
             state,
@@ -112,6 +136,9 @@ impl RouterProcessorState {
             chords: HashMap::new(),
             chord_subscribers: HashMap::new(),
             chord_addrs: LruCache::new(500),
+
+            // Veilid Processor
+            veilid,
 
             // Directory items
             directory_subscribers: HashSet::new(),
@@ -160,31 +187,34 @@ impl RouterProcessorState {
                     // ===== Chord Operations =====
                     RouterProcessorMessage::JoinChord(addr) => {
                         self.handle_join_chord(addr).await;
-                    },
+                    }
                     RouterProcessorMessage::HostChord(listen_addr) => {
                         self.handle_host_chord(listen_addr).await;
-                    },
+                    }
                     RouterProcessorMessage::LeaveChord(name) => {
                         self.handle_leave_chord(name).await;
-                    },
+                    }
 
                     RouterProcessorMessage::AddrUpdate(id, addr) => {
                         // if there is already a link for this id, ignore. Otherwise:
                         // create a new link to this address
                         println!("Got addr update");
-                        let relation = Relation{role: Role::Peer, id};
-                        if !self.links.contains_key(&relation){
+                        let relation = Relation {
+                            role: Role::Peer,
+                            id,
+                        };
+                        if !self.links.contains_key(&relation) {
                             println!("Creating new link");
                             let self_relation = self.state.self_relation().await;
                             let new_link = Link::connect(self_relation, addr, relation).await;
                             if let Some(new_link) = new_link {
                                 println!("New link connected");
                                 self.approved_link_handler(new_link).await;
-                            }else{
+                            } else {
                                 println!("Link failed to connect");
                             }
                         }
-                    },
+                    }
 
                     RouterProcessorMessage::SetName(name) => {
                         // save new name
@@ -201,24 +231,23 @@ impl RouterProcessorState {
                             title: "Name:".into(),
                             inputs: vec![
                                 ("text".to_string(), name.clone()),
-                                ("textentry".to_string(), "New Name".into())
+                                ("textentry".to_string(), "New Name".into()),
                             ],
-                            cb: |idx, name, input, _|{
-                                match input{
-                                    spider_link::message::UiInput::Click => None,
-                                    spider_link::message::UiInput::Text(name) => {
-                                        let router_msg = RouterProcessorMessage::SetName(name);
-                                        let msg = ProcessorMessage::RouterMessage(router_msg);
-                                        Some(msg)
-                                    },
+                            cb: |idx, name, input, _| match input {
+                                spider_link::message::UiInput::Click => None,
+                                spider_link::message::UiInput::Text(name) => {
+                                    let router_msg = RouterProcessorMessage::SetName(name);
+                                    let msg = ProcessorMessage::RouterMessage(router_msg);
+                                    Some(msg)
                                 }
                             },
                             data: String::new(),
                         };
                         self.sender.send_ui(msg).await;
                         // message name on existing channels
-                        for (_, link) in &self.links{
-                            let msg = RouterMessage::SetIdentityProperty("name".into(), name.clone());
+                        for (_, link) in &self.links {
+                            let msg =
+                                RouterMessage::SetIdentityProperty("name".into(), name.clone());
                             let msg = Message::Router(msg);
                             link.send(msg).await;
                         }
@@ -242,13 +271,11 @@ impl RouterProcessorState {
 
                             associate.send_op(AssociateRequest::GetPeerAddresses).await;
                             let peer_addrs = match associate.recv_op(None).await {
-                                Some(AssociateResponse::PeerAddresses{addrs}) => {
-                                    addrs
-                                },
+                                Some(AssociateResponse::PeerAddresses { addrs }) => addrs,
                                 _ => {
                                     // chord has invalid response
                                     continue;
-                                },
+                                }
                             };
                             let chord_state = chord_entry.get_state_mut();
                             chord_state.add_addrs(peer_addrs.clone());
@@ -261,8 +288,13 @@ impl RouterProcessorState {
                         }
                         // Handle chord address subscriptions
                         let mut messages = Vec::with_capacity(self.chord_subscribers.len());
-                        for (rel, limit) in &self.chord_subscribers{
-                            let x: Vec<String> = self.chord_addrs.iter().take(*limit).map(|(x, _)|{x.clone()}).collect();
+                        for (rel, limit) in &self.chord_subscribers {
+                            let x: Vec<String> = self
+                                .chord_addrs
+                                .iter()
+                                .take(*limit)
+                                .map(|(x, _)| x.clone())
+                                .collect();
                             // println!("Sending Chord Subscription: {:?}", x);
                             let msg = Message::Router(RouterMessage::ChordAddrs(x));
                             messages.push((rel.clone(), msg));
@@ -270,14 +302,12 @@ impl RouterProcessorState {
                         for (rel, msg) in messages {
                             self.send_msg(rel, msg).await;
                         }
-                        
+
                         // Save Directory state
                         self.state.save_directory(&self.directory).await;
 
                         // Clean approval codes
-                        self.approval_codes.retain(|_, v|{
-                            v < &mut Instant::now()
-                        });
+                        self.approval_codes.retain(|_, v| v < &mut Instant::now());
                     }
                 }
             }
@@ -285,7 +315,7 @@ impl RouterProcessorState {
         handle
     }
 
-    async fn init(&mut self){
+    async fn init(&mut self) {
         // ===== Setup menu items =====
         // Change/Set name
         let name = self.state.name().await;
@@ -294,16 +324,14 @@ impl RouterProcessorState {
             title: "Name:".into(),
             inputs: vec![
                 ("text".to_string(), name.clone()),
-                ("textentry".to_string(), "New Name".into())
+                ("textentry".to_string(), "New Name".into()),
             ],
-            cb: |idx, name, input, _|{
-                match input{
-                    spider_link::message::UiInput::Click => None,
-                    spider_link::message::UiInput::Text(name) => {
-                        let router_msg = RouterProcessorMessage::SetName(name);
-                        let msg = ProcessorMessage::RouterMessage(router_msg);
-                        Some(msg)
-                    },
+            cb: |idx, name, input, _| match input {
+                spider_link::message::UiInput::Click => None,
+                spider_link::message::UiInput::Text(name) => {
+                    let router_msg = RouterProcessorMessage::SetName(name);
+                    let msg = ProcessorMessage::RouterMessage(router_msg);
+                    Some(msg)
                 }
             },
             data: String::new(),
@@ -316,14 +344,12 @@ impl RouterProcessorState {
             header: String::from("Connected Chords"),
             title: String::from("Connect:"),
             inputs: vec![("textentry".to_string(), "Chord Address".to_string())],
-            cb: |idx, name, input, _|{
-                match input{
-                    spider_link::message::UiInput::Click => None,
-                    spider_link::message::UiInput::Text(addr) => {
-                        let router_msg = RouterProcessorMessage::JoinChord(addr);
-                        let msg = ProcessorMessage::RouterMessage(router_msg);
-                        Some(msg)
-                    },
+            cb: |idx, name, input, _| match input {
+                spider_link::message::UiInput::Click => None,
+                spider_link::message::UiInput::Text(addr) => {
+                    let router_msg = RouterProcessorMessage::JoinChord(addr);
+                    let msg = ProcessorMessage::RouterMessage(router_msg);
+                    Some(msg)
                 }
             },
             data: String::new(),
@@ -335,14 +361,12 @@ impl RouterProcessorState {
             header: String::from("Connected Chords"),
             title: String::from("Host New:"),
             inputs: vec![("textentry".to_string(), "Chord Listen Address".to_string())],
-            cb: |idx, name, input, _|{
-                match input{
-                    spider_link::message::UiInput::Click => None,
-                    spider_link::message::UiInput::Text(addr) => {
-                        let router_msg = RouterProcessorMessage::HostChord(addr);
-                        let msg = ProcessorMessage::RouterMessage(router_msg);
-                        Some(msg)
-                    },
+            cb: |idx, name, input, _| match input {
+                spider_link::message::UiInput::Click => None,
+                spider_link::message::UiInput::Text(addr) => {
+                    let router_msg = RouterProcessorMessage::HostChord(addr);
+                    let msg = ProcessorMessage::RouterMessage(router_msg);
+                    Some(msg)
                 }
             },
             data: String::new(),
@@ -354,7 +378,6 @@ impl RouterProcessorState {
 
         // Initialize directory functions
         self.init_directory_functions().await;
-
     }
 
     async fn process_remote_message(&mut self, rel: Relation, msg: RouterMessage) {
@@ -366,39 +389,40 @@ impl RouterProcessorState {
             // are already approved.
             RouterMessage::ApprovalCode(_) => {}
             RouterMessage::Approved => {} // base sends this, not recv
-            RouterMessage::Denied => {} // base sends this, not recv
+            RouterMessage::Denied => {}   // base sends this, not recv
 
             // Event Messages
             RouterMessage::SendEvent(name, externals, data) => {
-                self.handle_send_event(rel.clone(), name, externals, data).await;
-            },
+                self.handle_send_event(rel.clone(), name, externals, data)
+                    .await;
+            }
             RouterMessage::Event(name, _, data) => {
                 // re-route events from peers to appropriate peripherals
                 // The known relation of the link is used as the from field in the event
                 self.handle_event(name, rel, data).await;
-            },
+            }
             RouterMessage::Subscribe(name) => {
-                if rel.is_peer(){
+                if rel.is_peer() {
                     return; // dont allow subscriptions from peers (at least for now)
                 }
                 let entry = self.event_subscribers.entry(name);
                 let subscriber_set = entry.or_default();
                 subscriber_set.insert(rel);
-            },
+            }
             RouterMessage::Unsubscribe(name) => {
-                if rel.is_peer(){
+                if rel.is_peer() {
                     return; // dont allow subscriptions from peers (at least for now)
                 }
-                match self.event_subscribers.get_mut(&name){
+                match self.event_subscribers.get_mut(&name) {
                     Some(subscriber_set) => {
                         subscriber_set.remove(&rel);
                         if subscriber_set.is_empty() {
                             self.event_subscribers.remove(&name);
                         }
-                    },
-                    None => {}, // there were no subscribers to this message type
+                    }
+                    None => {} // there were no subscribers to this message type
                 }
-            },
+            }
 
             // Directory Messages
             RouterMessage::SubscribeDir => {
@@ -421,7 +445,12 @@ impl RouterProcessorState {
             RouterMessage::SubscribeChord(limit) => {
                 println!("===== Subscribing to chord!");
                 self.chord_subscribers.insert(rel.clone(), limit);
-                let x: Vec<String> = self.chord_addrs.iter().take(limit).map(|(x, _)|{x.clone()}).collect();
+                let x: Vec<String> = self
+                    .chord_addrs
+                    .iter()
+                    .take(limit)
+                    .map(|(x, _)| x.clone())
+                    .collect();
                 let msg = Message::Router(RouterMessage::ChordAddrs(x));
                 self.send_msg(rel, msg).await;
             }
@@ -430,6 +459,14 @@ impl RouterProcessorState {
             }
             RouterMessage::ChordAddrs(..) => {
                 // base sends this, doesnt recieve
+            }
+
+            // Invite Messages
+            RouterMessage::Invite(invite) => {
+                self.handle_invite(invite).await;
+            }
+            RouterMessage::GenerateInvite(invite_type) => {
+                self.handle_generate_invite(Some(rel), invite_type).await;
             }
         }
     }
@@ -454,13 +491,13 @@ impl RouterProcessorState {
         self.add_identity(relation.clone()).await;
 
         // insert pending link messages into link
-        if let Some((_, _, msgs)) = self.pending_links.remove(&relation){
-            for msg in msgs{
+        if let Some((_, _, msgs)) = self.pending_links.remove(&relation) {
+            for msg in msgs {
                 println!("Adding message to new link");
                 link.send(msg).await;
             }
         }
-        
+
         // add link to structures
         self.links.insert(relation.clone(), link);
 
@@ -486,19 +523,43 @@ impl RouterProcessorState {
 
     async fn send_msg(&mut self, relation: Relation, msg: Message) {
         // println!("Sending message: {:?}", msg);
+        if self
+            .directory
+            .get(&relation)
+            .is_some_and(|f| f.get("veilid_enabled").is_some_and(|f| f == "true"))
+        {
+            if let Some(veilid) = &mut self.veilid {
+                match veilid
+                    .send(VeilidProcessorMessage::RouteMessage(relation, msg))
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(_) => {
+                        // This errors when the veilid processor has terminated.
+                        self.veilid = None;
+                    }
+                }
+            }
+            // If a message was sent through veilid, do not also try the chord
+            // If the message could not be sent through veilid, but the reciever
+            // has indicated that veilid is enabled, avoid surprising anyone by
+            // sending a message on the chord.
+            return;
+        }
+
         let msg = if let Some(link) = self.links.get_mut(&relation) {
             if let Err(e) = link.send(msg).await {
                 // Connection is dead, remove the link
                 self.links.remove(&relation);
                 e.0
-            }else{
+            } else {
                 return;
             }
-        }else{
+        } else {
             msg
         };
 
-         // no link, no send at the moment (should buffer messages and start a new connection)
+        // no link, no send at the moment (should buffer messages and start a new connection)
         if !self.links.contains_key(&relation) {
             // insert into pending links
             println!("Link is pending");
@@ -507,17 +568,18 @@ impl RouterProcessorState {
                     println!("adding message to entry");
                     pending_msgs.push(msg);
                     *tries = 0;
-                },
+                }
                 None => {
                     // not already in, need to init connection requests
                     println!("new pending entry");
                     let pending_msgs = vec![msg];
                     let mut t = Instant::now();
                     t = t - Duration::from_secs(600);
-                    self.pending_links.insert(relation.clone(), (t, 0u8, pending_msgs));
+                    self.pending_links
+                        .insert(relation.clone(), (t, 0u8, pending_msgs));
                     // start connection process
                     self.process_pending_link(relation).await;
-                },
+                }
             }
         }
     }
@@ -540,19 +602,19 @@ impl RouterProcessorState {
         }
         let mut rng = StdRng::from_rng(rand::thread_rng()).unwrap();
         if connected.len() >= min {
-            for reciever in connected.choose_multiple(&mut rng, min){
+            for reciever in connected.choose_multiple(&mut rng, min) {
                 if let Some(link) = self.links.get_mut(reciever) {
                     link.send(msg.clone()).await;
                 }
             }
         } else {
-            let disconnected_count = min-connected.len();
+            let disconnected_count = min - connected.len();
             for rel in connected {
                 if let Some(link) = self.links.get_mut(&rel) {
                     link.send(msg.clone()).await;
                 }
             }
-            for reciever in disconnected.choose_multiple(&mut rng, disconnected_count){
+            for reciever in disconnected.choose_multiple(&mut rng, disconnected_count) {
                 if let Some(link) = self.links.get_mut(reciever) {
                     link.send(msg.clone()).await;
                 }
@@ -560,13 +622,13 @@ impl RouterProcessorState {
         }
     }
 
-    async fn process_pending_link(&mut self, relation: Relation){
-        if let Some((start, tries, msgs)) = self.pending_links.get_mut(&relation){
+    async fn process_pending_link(&mut self, relation: Relation) {
+        if let Some((start, tries, msgs)) = self.pending_links.get_mut(&relation) {
             println!("Processing pending");
             // check if pending link has connected
-            if let Some(link) = self.links.get_mut(&relation){
+            if let Some(link) = self.links.get_mut(&relation) {
                 println!("Found link, inserting messages");
-                for msg in msgs{
+                for msg in msgs {
                     link.send(msg.clone()).await;
                 }
                 self.pending_links.remove(&relation);
@@ -574,7 +636,7 @@ impl RouterProcessorState {
             }
 
             // if number of attempts has been met, stop, remove from pending
-            if *tries > 10{
+            if *tries > 10 {
                 println!("Too many tries");
                 self.pending_links.remove(&relation);
                 return;
@@ -582,26 +644,60 @@ impl RouterProcessorState {
             *tries += 1;
 
             // if not, test time since connection attempt
-            if start.elapsed().as_secs() < 10{
+            if start.elapsed().as_secs() < 10 {
                 println!("Too soon to retry");
                 return; // allow more time to occur
             }
             *start = Instant::now(); // reset timer
 
             // make connection attempt on all chords in list
-            for (name, chord_entry) in self.chords.iter_mut(){
+            for (name, chord_entry) in self.chords.iter_mut() {
                 println!("Making request on chord");
                 chord_entry.resolve_id(relation.id.clone()).await;
             }
         }
     }
 
-    async fn process_pending_links(&mut self){
+    async fn process_pending_links(&mut self) {
         let relations: Vec<Relation> = self.pending_links.keys().cloned().collect();
-        for relation in relations{
+        for relation in relations {
             println!("Processing pending link for relation");
             self.process_pending_link(relation).await;
         }
     }
 
+    async fn handle_invite(&mut self, invite: Invite) {
+        match invite {
+            Invite::Chord {} => {} // Not implemented yet
+            Invite::Veilid(invite) => {
+                if self.veilid.is_none() {
+                    // If veilid is not enabled, invite is meaningless
+                    return;
+                }
+                self.set_identity_system(
+                    invite.rel().clone(),
+                    "velid_enabled".into(),
+                    "true".into(),
+                )
+                .await;
+                if let Some(veilid) = &self.veilid {
+                    veilid.send(VeilidProcessorMessage::Invite(invite)).await;
+                }
+            }
+        }
+    }
+
+    async fn handle_generate_invite(&self, rel: Option<Relation>, invite_type: InviteType) {
+        match invite_type {
+            InviteType::Chord => {
+                // Unimplemented
+            },
+            InviteType::Veilid => {
+                if let Some(veilid) = &self.veilid {
+                    let msg = VeilidProcessorMessage::GenerateInvite(rel);
+                    veilid.send(msg).await;
+                }
+            },
+        }
+    }
 }

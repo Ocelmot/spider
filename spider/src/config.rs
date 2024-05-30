@@ -25,7 +25,6 @@ pub struct SpiderConfig{
     peripheral_path: Option<String>,
 
     // UI Config
-    // UIConfig
 
     // Dataset configuration
     #[serde(default)]
@@ -33,6 +32,9 @@ pub struct SpiderConfig{
 
     #[serde(default)]
     group_path: Option<String>,
+
+    // Router configuration
+    veilid_enabled: Option<bool>
 }
 
 
@@ -61,6 +63,10 @@ impl SpiderConfig {
         let s = self.dataset_path.clone().unwrap_or(String::from("groups"));
         PathBuf::from(s)
     }
+
+    pub fn veilid_enabled(&self) -> bool {
+        self.veilid_enabled.unwrap_or_else(default_veilid_enabled)
+    }
 }
 
 
@@ -81,4 +87,8 @@ fn default_log_path() -> String {
 
 fn default_state_data_path() -> String {
     "state.dat".into()
+}
+
+fn default_veilid_enabled() -> bool {
+    true
 }

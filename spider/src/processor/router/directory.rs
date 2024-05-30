@@ -1,6 +1,6 @@
 
 use phf::{Set, phf_set};
-use spider_link::{message::{RouterMessage, Message, DirectoryEntry}, Relation};
+use spider_link::{message::{DirectoryEntry, Message, RouterMessage, UiInput}, Relation};
 
 use crate::processor::{ui::UiProcessorMessage, message::ProcessorMessage};
 
@@ -9,7 +9,8 @@ use super::{RouterProcessorState, RouterProcessorMessage};
 
 static SYSTEM_PROPERTIES: Set<&'static str> = phf_set! {
     "nickname",
-    "blocked"
+    "blocked",
+    "veilid_enabled",
 };
 
 static SELF_PROPERTIES: Set<&'static str> = phf_set! {
@@ -193,13 +194,13 @@ impl RouterProcessorState{
             cb: |idx, name, input, data|{
                 let rel = serde_json::from_str(data).unwrap();
                 match input{
-                    spider_link::message::UiInput::Click => {
+                    UiInput::Click => {
                         // only button will send click
                         let router_msg = RouterProcessorMessage::ClearDirectoryEntry(rel);
                         let msg = ProcessorMessage::RouterMessage(router_msg);
                         Some(msg)
                     },
-                    spider_link::message::UiInput::Text(name) => {
+                    UiInput::Text(name) => {
                         // only textentry will send text
                         let router_msg = RouterProcessorMessage::SetNickname(rel, name);
                         let msg = ProcessorMessage::RouterMessage(router_msg);

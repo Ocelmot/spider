@@ -101,7 +101,7 @@ async fn main() -> Result<(), io::Error> {
 	}
 
 	// start processor 
-	let processor_handle = pb.start_processor().expect("processor was able to start");
+	let processor_handle = pb.start_processor().await.expect("processor was able to start");
 
 	processor_handle.join().await;
 	Ok(())

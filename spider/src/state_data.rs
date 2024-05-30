@@ -144,9 +144,9 @@ struct StateDataInner {
     pub peripheral_services: HashMap<String, bool>,
 
     // Router Items
-    /// Map from chord names to listen_adder, pub_addr, and vectors of recent addresses
     #[serde(default)]
     name: Option<String>,
+    /// Map from chord names to listen_adder, pub_addr, and vectors of recent addresses
     #[serde(default)]
     chords: HashMap<String, (String, String, String, Vec<String>)>,
     #[serde(default)]

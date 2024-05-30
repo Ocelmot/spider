@@ -21,10 +21,13 @@ use std::sync::Arc;
 
 use base64::{engine::general_purpose, Engine};
 use rsa::{
+    pkcs1v15::{Signature, SigningKey, VerifyingKey},
     pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey},
+    signature::{SignatureEncoding, Signer, Verifier},
     RsaPrivateKey,
 };
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use tokio::{
     net::ToSocketAddrs,
     sync::{mpsc::Receiver, Mutex},
@@ -168,6 +171,16 @@ impl Relation {
         bytes.push(role);
         sha256::digest(bytes.as_slice())
     }
+
+    /// Use the public key in this relation to verify some data against a signature.
+    pub fn verify(&self, data: &Vec<u8>, sig: &Vec<u8>) -> bool {
+        let key = self.id.as_pub_key().unwrap();
+        let verifying_key = VerifyingKey::<Sha256>::new(key);
+        match Signature::try_from(sig.as_slice()) {
+            Ok(sig) => verifying_key.verify(data, &sig).is_ok(),
+            Err(_) => false,
+        }
+    }
 }
 
 /// A self relation functions similarly to a [Relation], but it also includes
@@ -226,6 +239,20 @@ impl SelfRelation {
         addr: A,
     ) -> (Receiver<Link>, Arc<Mutex<Option<String>>>) {
         Link::listen(self.clone(), addr)
+    }
+
+    /// Sign some data using the private key within this SelfRelation.
+    /// Returs the signature in byte form.
+    pub fn sign(&self, data: Vec<u8>) -> Vec<u8>{
+        let key = self.private_key();
+        let signing_key = SigningKey::<Sha256>::new(key);
+        signing_key.sign(&data).to_vec()
+    }
+
+    /// Verify a signature produced by this SelfRelation using the public
+    /// key within the Relation against a signature.
+    pub fn verify(&self, data: &Vec<u8>, sig: &Vec<u8>) -> bool {
+        self.relation.verify(data, sig)
     }
 }
 

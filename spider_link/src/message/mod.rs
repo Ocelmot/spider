@@ -47,6 +47,9 @@ mod router;
 pub use router::{
     RouterMessage,
     DirectoryEntry,
+    InviteType,
+    Invite,
+    VeilidInvite,
 };
 
 mod group;
@@ -63,6 +66,11 @@ pub use group::{
     ProposalId,
     ProposalAction,
     ProposalDatasetChange,
+};
+
+mod veilid;
+pub use veilid::{
+    VeilidMessage
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

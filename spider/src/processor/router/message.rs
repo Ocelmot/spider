@@ -1,5 +1,5 @@
 use spider_link::{
-    message::{RouterMessage, Message},
+    message::{Message, RouterMessage},
     Link, Relation, SpiderId2048,
 };
 

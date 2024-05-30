@@ -87,7 +87,7 @@ impl ProcessorBuilder {
         }
     }
 
-    pub fn start_processor(self) -> Option<ProcessorHandle> {
+    pub async fn start_processor(self) -> Option<ProcessorHandle> {
         let config = match self.config {
             Some(config) => config,
             None => return None,
@@ -96,7 +96,7 @@ impl ProcessorBuilder {
             Some(state) => state,
             None => return None,
         };
-        let processor = Processor::new(config, state);
+        let processor = Processor::new(config, state).await;
         Some(processor.start())
     }
 }
@@ -120,7 +120,7 @@ struct Processor {
 }
 
 impl Processor {
-    fn new(config: SpiderConfig, state: StateData) -> Self {
+    async fn new(config: SpiderConfig, state: StateData) -> Self {
         // create channel
         let (sender, receiver) = channel(500);
         let sender = ProcessorLink::new(config.clone(), state.clone(), sender);
@@ -129,7 +129,7 @@ impl Processor {
         let listener = ListenerProcessor::new(config.clone(), state.clone(), sender.clone());
 
         // start router
-        let router = RouterProcessor::new(config.clone(), state.clone(), sender.clone());
+        let router = RouterProcessor::new(config.clone(), state.clone(), sender.clone()).await;
 
         // start peripherals
         let peripherals = PeripheralsProcessor::new(config.clone(), state.clone(), sender.clone());
