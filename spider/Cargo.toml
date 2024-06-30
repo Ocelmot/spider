@@ -35,3 +35,6 @@ rand = "0.8.5"
 regex = "1.8.1"
 
 num-bigint = {version = "0.4.3", features = ["serde"]}
+bimap = "0.6.3"
+log = "0.4.21"
+simple_logger = "5.0.0"

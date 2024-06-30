@@ -2,6 +2,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use log::{error, info};
 use num_bigint::BigUint;
 use spider_link::message::{GroupEvent, GroupId, GroupMessage, Message};
 use spider_link::Relation;
@@ -82,7 +83,7 @@ impl GroupProcessorState {
     fn start(mut self) -> JoinHandle<()> {
         let handle = tokio::spawn(async move {
             // Load the groups!
-            println!("Loading groups....");
+            info!("Loading groups....");
             let group_path = self.config.group_path();
             if !group_path.exists() {
                 create_dir(&group_path).await;
@@ -117,7 +118,7 @@ impl GroupProcessorState {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to load group: {}", e);
+                    error!("Failed to load group: {}", e);
                 }
             }
         }
@@ -181,7 +182,7 @@ impl GroupProcessorState {
 
             // Peripheral message handling
             GroupMessage::Create(group_id) => {
-                println!("Creating group");
+                info!("Creating group");
                 if !self.groups.contains_key(&group_id) {
                     let mut path = self.config.group_path();
                     path.push(group_id.as_simple().to_string());
@@ -193,7 +194,7 @@ impl GroupProcessorState {
             }
             // This node has been invited
             GroupMessage::Invite(group_id, members) => {
-                println!("recieving invite");
+                info!("recieving invite");
                 // Create the group as long as it does not exist
                 if !self.groups.contains_key(&group_id) && !self.pending_groups.contains_key(&group_id) {
                     let us = self.state.self_relation().await.relation;
@@ -251,7 +252,7 @@ impl GroupProcessorState {
             }
             GroupMessage::Dataset(_, _, _) => todo!(), // Base sends does not recieve.
         }
-        println!("^^^^^^^^^^^^^^^handle public message^^^^^^^^^^^^^^^^^^");
+        info!("^^^^^^^^^^^^^^^handle public message^^^^^^^^^^^^^^^^^^");
         for (_, group) in &self.groups {
             group.print();
         }
@@ -261,10 +262,10 @@ impl GroupProcessorState {
     /// or acknowlegements and notify the subscribed peripherals.
     async fn handle_subscribers(&mut self, group_id: GroupId, events: Vec<GroupEvent>) {
         if let Some(subscribers) = self.subscribers.get(&group_id) {
-            println!("Processing GroupEvents...");
+            info!("Processing GroupEvents...");
             let rels: Vec<Relation> = subscribers.iter().cloned().collect();
             for event in events {
-                println!("GroupEvent occurred: {:?}", event);
+                info!("GroupEvent occurred: {:?}", event);
                 let msg = GroupMessage::GroupEvent(group_id, event);
                 let msg = Message::Group(msg);
                 self.sender.multicast_message(rels.clone(), msg).await;
@@ -274,7 +275,7 @@ impl GroupProcessorState {
 
     async fn handle_upkeep(&mut self) {
         let self_id = self.state.self_id().await.as_big_uint();
-        println!(
+        info!(
             "This node's id: {}",
             (self_id % BigUint::from(1000000u32)).to_string()
         );

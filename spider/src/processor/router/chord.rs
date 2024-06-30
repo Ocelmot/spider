@@ -1,6 +1,7 @@
 use std::{net::{SocketAddr, IpAddr}, collections::HashSet};
 
 use dht_chord::{TCPChord, chord::ChordHandle, associate::{AssociateRequest, AssociateResponse, AssociateChannel}, adaptor::{AssociateClient, ChordAdaptor}, TCPAdaptor};
+use log::info;
 use lru::LruCache;
 use spider_link::SpiderId2048;
 use tokio::{sync::mpsc::{channel, Sender}, select};
@@ -29,7 +30,7 @@ impl RouterProcessorState {
                 }
 
             }else{
-                println!("Could not start saved chord: {chord_name}");
+                info!("Could not start saved chord: {chord_name}");
             }
         }
     }
@@ -184,10 +185,10 @@ impl RouterProcessorState {
                 ("text".to_string(), status),
                 ("button".to_string(), "Remove".to_string()),
             ],
-            cb: |idx, name, input, _|{
-                match input{
+            cb: |e|{
+                match e.input() {
                     spider_link::message::UiInput::Click => {
-                        let router_msg = RouterProcessorMessage::LeaveChord(name.to_string());
+                        let router_msg = RouterProcessorMessage::LeaveChord(e.title().clone());
                         let msg = ProcessorMessage::RouterMessage(router_msg);
                         Some(msg)
                     },
@@ -274,28 +275,28 @@ impl ChordEntry{
             loop{
                 select! {
                     request = receiver.recv() => {
-                        println!("Chordprocessor recvd request");
+                        info!("Chordprocessor recvd request");
                         match request{
                             Some(id) => {
                                 let msg = AssociateRequest::GetAdvertOf{id};
                                 associate.send_op(msg).await;
                             },
                             None => {
-                                println!("Chordprocessor quitting");
+                                info!("Chordprocessor quitting");
                                 // receiver is over, quit
                                 return;
                             },
                         }
                     },
                     response = associate.recv_op(None) => {
-                        println!("Chordprocessor got response");
+                        info!("Chordprocessor got response");
                         match response{
                             Some(response) => {
                                 if let AssociateResponse::AdvertOf { id, data } = response{
-                                    println!("Got advert: {:?}", data);
+                                    info!("Got advert: {:?}", data);
                                     if let Some(data) = data{
                                         if let Ok(addr) = String::from_utf8(data){
-                                            println!("Sending router update: {}", addr.to_string());
+                                            info!("Sending router update: {}", addr.to_string());
                                             let router_msg = RouterProcessorMessage::AddrUpdate(id, addr.to_string());
                                             let msg = ProcessorMessage::RouterMessage(router_msg);
                                             processor_sender.send(msg).await;
@@ -304,7 +305,7 @@ impl ChordEntry{
                                 }
                             },
                             None => {
-                                println!("Chordprocessor quitting II");
+                                info!("Chordprocessor quitting II");
                                 // Chord has closed, quit
                                 return;
                             },

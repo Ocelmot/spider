@@ -6,6 +6,7 @@ use crate::{config::SpiderConfig, state_data::StateData};
 use super::{link::ProcessorLink, ui::UiProcessorMessage, message::ProcessorMessage};
 
 mod message;
+use log::info;
 pub use message::PeripheralProcessorMessage;
 
 mod manifest;
@@ -90,7 +91,7 @@ impl PeripheralProcessorState{
                     Some(msg) => msg,
                     None => break,
                 };
-                println!("Peripheral message: {:?}", msg);
+                info!("Peripheral message: {:?}", msg);
 
                 match msg {                    
                     PeripheralProcessorMessage::Install(addr) => self.install_service(addr).await,
@@ -111,11 +112,11 @@ impl PeripheralProcessorState{
             header: String::from("Peripheral Services"),
             title: String::from("Install:"),
             inputs: vec![("textentry".to_string(), "Git Path".to_string())],
-            cb: |idx, name, input, _|{
-                match input{
+            cb: |e|{
+                match e.input() {
                     spider_link::message::UiInput::Click => None,
                     spider_link::message::UiInput::Text(addr) => {
-                        let peripheral_msg = PeripheralProcessorMessage::Install(addr);
+                        let peripheral_msg = PeripheralProcessorMessage::Install(addr.clone());
                         let msg = ProcessorMessage::PeripheralMessage(peripheral_msg);
                         Some(msg)
                     },
@@ -150,7 +151,7 @@ impl PeripheralProcessorState{
     }
 
     async fn install_service(&mut self, addr: String){
-        println!("========== Installing! ============\n{}", addr);
+        info!("========== Installing! ============\n{}", addr);
         // parse addr
         let re = Regex::new(r"/([^/]*?)(\.git)?$").unwrap();
         let name = match re.captures(&addr){
@@ -164,19 +165,19 @@ impl PeripheralProcessorState{
             },
             None => return ,
         };
-        println!("package name: {}", name);
+        info!("package name: {}", name);
 
         let path = self.get_service_directory(&name);
-        println!("Produced path: {}", path.display());
+        info!("Produced path: {}", path.display());
         // create directory
         create_dir_all(path.clone()).await.unwrap();
 
         // launch git in directory
-        println!("launching git...");
+        info!("launching git...");
         self.download_with_git(&path, &addr).await;
 
         // copy keyfile into directory
-        println!("writing keyfile...");
+        info!("writing keyfile...");
         self.write_keyfile(path.clone()).await;
 
         // list process in state file
@@ -185,7 +186,7 @@ impl PeripheralProcessorState{
         drop(ps);
 
         // launch peripheral as sub-process
-        println!("launching subprocess...");
+        info!("launching subprocess...");
         let child = self.launch_peripheral_service(name.clone()).await;
         if let Some(child) = child {
             self.children.insert(name.clone(), child);
@@ -236,11 +237,11 @@ impl PeripheralProcessorState{
     }
 
     async fn uninstall_service(&mut self, name: String){
-        println!("========== Uninstalling! ============");
-        println!("package name: {}", name);
+        info!("========== Uninstalling! ============");
+        info!("package name: {}", name);
 
         let path = self.get_service_directory(&name);
-        println!("Produced path: {}", path.display());
+        info!("Produced path: {}", path.display());
 
         // remove from state
         let mut ps = self.state.peripheral_services().await;

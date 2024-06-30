@@ -1,13 +1,12 @@
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-use serde::{Serialize, Deserialize};
-
-
-
-
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SpiderConfig{
+pub struct SpiderConfig {
     #[serde(default = "default_listen_addr")]
     pub listen_addr: String,
     #[serde(default = "default_pub_addr")]
@@ -34,32 +33,37 @@ pub struct SpiderConfig{
     group_path: Option<String>,
 
     // Router configuration
-    veilid_enabled: Option<bool>
+    veilid_enabled: Option<bool>,
 }
-
 
 impl SpiderConfig {
     pub fn from_file(path: &Path) -> Self {
-        let data = match fs::read_to_string(&path){
+        let data = match fs::read_to_string(&path) {
             Ok(str) => str,
             Err(_) => String::from("{}"),
         };
         // let data = fs::read_to_string(&path).expect(&format!("Failed to read config file: {:?}", path));
-		let config = serde_json::from_str(&data).expect("Failed to deserialize config");
+        let config = serde_json::from_str(&data).expect("Failed to deserialize config");
         config
     }
 
-    pub fn peripheral_path(&self)-> PathBuf{
-        let s = self.peripheral_path.clone().unwrap_or(String::from("peripherals"));
+    pub fn peripheral_path(&self) -> PathBuf {
+        let s = self
+            .peripheral_path
+            .clone()
+            .unwrap_or(String::from("peripherals"));
         PathBuf::from(s)
     }
 
-    pub fn dataset_path(&self)-> PathBuf{
-        let s = self.dataset_path.clone().unwrap_or(String::from("datasets"));
+    pub fn dataset_path(&self) -> PathBuf {
+        let s = self
+            .dataset_path
+            .clone()
+            .unwrap_or(String::from("datasets"));
         PathBuf::from(s)
     }
 
-    pub fn group_path(&self)-> PathBuf{
+    pub fn group_path(&self) -> PathBuf {
         let s = self.dataset_path.clone().unwrap_or(String::from("groups"));
         PathBuf::from(s)
     }
@@ -68,9 +72,6 @@ impl SpiderConfig {
         self.veilid_enabled.unwrap_or_else(default_veilid_enabled)
     }
 }
-
-
-
 
 // Defaults
 fn default_listen_addr() -> String {

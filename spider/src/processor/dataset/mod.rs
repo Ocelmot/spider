@@ -9,6 +9,7 @@ use crate::{config::SpiderConfig, state_data::StateData};
 use super::{link::ProcessorLink, ui::UiProcessorMessage};
 
 mod message;
+use log::info;
 pub use message::DatasetProcessorMessage;
 
 use spider_link::{
@@ -309,7 +310,7 @@ impl DatasetProcessorState {
 }
 
 async fn parse_dataset(path: &Path) -> Vec<DatasetData> {
-    println!("Path: {}", path.display());
+    info!("Path: {}", path.display());
     // create directories above file
     create_dir_all(path.parent().unwrap()).await.unwrap();
     let mut file = OpenOptions::new()

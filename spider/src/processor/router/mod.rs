@@ -5,6 +5,7 @@ use std::{
 };
 
 use dht_chord::associate::{AssociateRequest, AssociateResponse};
+use log::info;
 use lru::LruCache;
 use spider_link::{
     message::{DirectoryEntry, Invite, InviteType, Message, RouterMessage},
@@ -198,20 +199,20 @@ impl RouterProcessorState {
                     RouterProcessorMessage::AddrUpdate(id, addr) => {
                         // if there is already a link for this id, ignore. Otherwise:
                         // create a new link to this address
-                        println!("Got addr update");
+                        info!("Got addr update");
                         let relation = Relation {
                             role: Role::Peer,
                             id,
                         };
                         if !self.links.contains_key(&relation) {
-                            println!("Creating new link");
+                            info!("Creating new link");
                             let self_relation = self.state.self_relation().await;
                             let new_link = Link::connect(self_relation, addr, relation).await;
                             if let Some(new_link) = new_link {
-                                println!("New link connected");
+                                info!("New link connected");
                                 self.approved_link_handler(new_link).await;
                             } else {
-                                println!("Link failed to connect");
+                                info!("Link failed to connect");
                             }
                         }
                     }
@@ -233,10 +234,10 @@ impl RouterProcessorState {
                                 ("text".to_string(), name.clone()),
                                 ("textentry".to_string(), "New Name".into()),
                             ],
-                            cb: |idx, name, input, _| match input {
+                            cb: |e| match e.input() {
                                 spider_link::message::UiInput::Click => None,
                                 spider_link::message::UiInput::Text(name) => {
-                                    let router_msg = RouterProcessorMessage::SetName(name);
+                                    let router_msg = RouterProcessorMessage::SetName(name.clone());
                                     let msg = ProcessorMessage::RouterMessage(router_msg);
                                     Some(msg)
                                 }
@@ -255,12 +256,28 @@ impl RouterProcessorState {
                     RouterProcessorMessage::SetNickname(rel, name) => {
                         self.set_identity_system(rel, "nickname".into(), name).await;
                     }
+                    RouterProcessorMessage::SetDirectoryEntry(rel, key, value) => {
+                        self.set_identity_system(rel, key, value).await;
+                    }
                     RouterProcessorMessage::ClearDirectoryEntry(rel) => {
                         self.clear_directory_entry_handler(rel).await;
                     }
 
+                    RouterProcessorMessage::AcceptInvite(invite) => {
+                        self.handle_accept_invite(invite).await;
+                    }
+                    RouterProcessorMessage::RevokeInvite(invite_id) => {
+                        self.handle_revoke_invite(invite_id).await;
+                    }
+                    
+
                     RouterProcessorMessage::Upkeep => {
                         // should check for disconnected peers, and clean them up
+
+                        // send upkeep to Veilid if applicable
+                        if let Some(veilid) = &self.veilid {
+                            veilid.send(VeilidProcessorMessage::Upkeep).await;
+                        }
 
                         // Process pending links
                         self.process_pending_links().await;
@@ -295,7 +312,7 @@ impl RouterProcessorState {
                                 .take(*limit)
                                 .map(|(x, _)| x.clone())
                                 .collect();
-                            // println!("Sending Chord Subscription: {:?}", x);
+                            // info!("Sending Chord Subscription: {:?}", x);
                             let msg = Message::Router(RouterMessage::ChordAddrs(x));
                             messages.push((rel.clone(), msg));
                         }
@@ -326,10 +343,10 @@ impl RouterProcessorState {
                 ("text".to_string(), name.clone()),
                 ("textentry".to_string(), "New Name".into()),
             ],
-            cb: |idx, name, input, _| match input {
+            cb: |e| match e.input() {
                 spider_link::message::UiInput::Click => None,
                 spider_link::message::UiInput::Text(name) => {
-                    let router_msg = RouterProcessorMessage::SetName(name);
+                    let router_msg = RouterProcessorMessage::SetName(name.clone());
                     let msg = ProcessorMessage::RouterMessage(router_msg);
                     Some(msg)
                 }
@@ -344,10 +361,10 @@ impl RouterProcessorState {
             header: String::from("Connected Chords"),
             title: String::from("Connect:"),
             inputs: vec![("textentry".to_string(), "Chord Address".to_string())],
-            cb: |idx, name, input, _| match input {
+            cb: |e| match e.input() {
                 spider_link::message::UiInput::Click => None,
                 spider_link::message::UiInput::Text(addr) => {
-                    let router_msg = RouterProcessorMessage::JoinChord(addr);
+                    let router_msg = RouterProcessorMessage::JoinChord(addr.clone());
                     let msg = ProcessorMessage::RouterMessage(router_msg);
                     Some(msg)
                 }
@@ -361,10 +378,10 @@ impl RouterProcessorState {
             header: String::from("Connected Chords"),
             title: String::from("Host New:"),
             inputs: vec![("textentry".to_string(), "Chord Listen Address".to_string())],
-            cb: |idx, name, input, _| match input {
+            cb: |e| match e.input() {
                 spider_link::message::UiInput::Click => None,
                 spider_link::message::UiInput::Text(addr) => {
-                    let router_msg = RouterProcessorMessage::HostChord(addr);
+                    let router_msg = RouterProcessorMessage::HostChord(addr.clone());
                     let msg = ProcessorMessage::RouterMessage(router_msg);
                     Some(msg)
                 }
@@ -443,7 +460,7 @@ impl RouterProcessorState {
 
             // Chord Connected Messages
             RouterMessage::SubscribeChord(limit) => {
-                println!("===== Subscribing to chord!");
+                info!("===== Subscribing to chord!");
                 self.chord_subscribers.insert(rel.clone(), limit);
                 let x: Vec<String> = self
                     .chord_addrs
@@ -461,6 +478,16 @@ impl RouterProcessorState {
                 // base sends this, doesnt recieve
             }
 
+            RouterMessage::VeilidEnabled(dht_key) => {
+                info!("Recieved VeilidEnabled msg");
+                if let Some(veilid) = &self.veilid {
+                    info!("Recieved VeilidEnabled inner");
+                    veilid.send(VeilidProcessorMessage::VeilidEnabled(rel.clone(), dht_key) ).await;
+                    // also update directory
+                    self.set_identity_system(rel, "veilid_enabled".into(), "true".into()).await;
+                }
+            }
+
             // Invite Messages
             RouterMessage::Invite(invite) => {
                 self.handle_invite(invite).await;
@@ -472,7 +499,7 @@ impl RouterProcessorState {
     }
 
     async fn approved_link_handler(&mut self, mut link: Link) {
-        println!("Adding new link");
+        info!("Adding new link");
         // get reciever+relation from link
         let mut rx = match link.take_recv() {
             Some(rx) => rx,
@@ -493,7 +520,7 @@ impl RouterProcessorState {
         // insert pending link messages into link
         if let Some((_, _, msgs)) = self.pending_links.remove(&relation) {
             for msg in msgs {
-                println!("Adding message to new link");
+                info!("Adding message to new link");
                 link.send(msg).await;
             }
         }
@@ -522,7 +549,22 @@ impl RouterProcessorState {
     }
 
     async fn send_msg(&mut self, relation: Relation, msg: Message) {
-        // println!("Sending message: {:?}", msg);
+        // info!("Sending message: {:?}", msg);
+
+        // If there is an existing Link, use it to send the message
+        let msg = if let Some(link) = self.links.get_mut(&relation) {
+            if let Err(e) = link.send(msg).await {
+                // Connection is dead, remove the link
+                self.links.remove(&relation);
+                e.0
+            } else {
+                return;
+            }
+        } else {
+            msg
+        };
+
+        // If there is no link, try to use Veilid
         if self
             .directory
             .get(&relation)
@@ -540,38 +582,25 @@ impl RouterProcessorState {
                     }
                 }
             }
-            // If a message was sent through veilid, do not also try the chord
-            // If the message could not be sent through veilid, but the reciever
-            // has indicated that veilid is enabled, avoid surprising anyone by
-            // sending a message on the chord.
+            // Do not try to establish a link if veilid is enabled.
+            // Otherwise this might expose an association between users
+            // when they are using Veilid.
             return;
         }
 
-        let msg = if let Some(link) = self.links.get_mut(&relation) {
-            if let Err(e) = link.send(msg).await {
-                // Connection is dead, remove the link
-                self.links.remove(&relation);
-                e.0
-            } else {
-                return;
-            }
-        } else {
-            msg
-        };
-
-        // no link, no send at the moment (should buffer messages and start a new connection)
+        // no link, and no Veilid, buffer the messages and track a number of retries
         if !self.links.contains_key(&relation) {
             // insert into pending links
-            println!("Link is pending");
+            info!("Link is pending");
             match self.pending_links.get_mut(&relation) {
                 Some((_, tries, pending_msgs)) => {
-                    println!("adding message to entry");
+                    info!("adding message to entry");
                     pending_msgs.push(msg);
                     *tries = 0;
                 }
                 None => {
                     // not already in, need to init connection requests
-                    println!("new pending entry");
+                    info!("new pending entry");
                     let pending_msgs = vec![msg];
                     let mut t = Instant::now();
                     t = t - Duration::from_secs(600);
@@ -624,10 +653,10 @@ impl RouterProcessorState {
 
     async fn process_pending_link(&mut self, relation: Relation) {
         if let Some((start, tries, msgs)) = self.pending_links.get_mut(&relation) {
-            println!("Processing pending");
+            info!("Processing pending");
             // check if pending link has connected
             if let Some(link) = self.links.get_mut(&relation) {
-                println!("Found link, inserting messages");
+                info!("Found link, inserting messages");
                 for msg in msgs {
                     link.send(msg.clone()).await;
                 }
@@ -637,7 +666,7 @@ impl RouterProcessorState {
 
             // if number of attempts has been met, stop, remove from pending
             if *tries > 10 {
-                println!("Too many tries");
+                info!("Too many tries");
                 self.pending_links.remove(&relation);
                 return;
             }
@@ -645,14 +674,14 @@ impl RouterProcessorState {
 
             // if not, test time since connection attempt
             if start.elapsed().as_secs() < 10 {
-                println!("Too soon to retry");
+                info!("Too soon to retry");
                 return; // allow more time to occur
             }
             *start = Instant::now(); // reset timer
 
             // make connection attempt on all chords in list
             for (name, chord_entry) in self.chords.iter_mut() {
-                println!("Making request on chord");
+                info!("Making request on chord");
                 chord_entry.resolve_id(relation.id.clone()).await;
             }
         }
@@ -661,7 +690,7 @@ impl RouterProcessorState {
     async fn process_pending_links(&mut self) {
         let relations: Vec<Relation> = self.pending_links.keys().cloned().collect();
         for relation in relations {
-            println!("Processing pending link for relation");
+            info!("Processing pending link for relation");
             self.process_pending_link(relation).await;
         }
     }
@@ -681,23 +710,42 @@ impl RouterProcessorState {
                 )
                 .await;
                 if let Some(veilid) = &self.veilid {
-                    veilid.send(VeilidProcessorMessage::Invite(invite)).await;
+                    veilid.send(VeilidProcessorMessage::AcceptInvite(invite)).await;
                 }
             }
         }
     }
 
     async fn handle_generate_invite(&self, rel: Option<Relation>, invite_type: InviteType) {
+        info!("Generating Invite...");
         match invite_type {
             InviteType::Chord => {
                 // Unimplemented
             },
             InviteType::Veilid => {
+                info!("Veilid invite");
                 if let Some(veilid) = &self.veilid {
+                    info!("Veilid active");
                     let msg = VeilidProcessorMessage::GenerateInvite(rel);
                     veilid.send(msg).await;
                 }
             },
+        }
+    }
+
+    pub(crate) async fn handle_accept_invite(&mut self, invite: Invite){
+        if let Some(veilid) = &self.veilid {
+            if let Invite::Veilid(invite) = invite {
+                let msg = VeilidProcessorMessage::AcceptInvite(invite);
+                veilid.send(msg).await;
+            }
+        }
+    }
+
+    pub(crate) async fn handle_revoke_invite(&mut self, invite_id: String){
+        if let Some(veilid) = &self.veilid {
+            let msg = VeilidProcessorMessage::RevokeInvite(invite_id);
+            veilid.send(msg).await;
         }
     }
 }

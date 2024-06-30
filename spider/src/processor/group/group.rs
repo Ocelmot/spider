@@ -5,6 +5,7 @@ use std::{
     path::PathBuf,
 };
 
+use log::info;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -205,7 +206,7 @@ impl Group {
         rel: Relation,
         change_id: ChangeId,
     ) {
-        println!("Responding to sync request for change: {:?}", change_id);
+        info!("Responding to sync request for change: {:?}", change_id);
 
         // reply with the change, if known.
         if let Some(change) = self.changes.get(&change_id) {
@@ -220,14 +221,14 @@ impl Group {
     /// Handler for [GroupMessage::SyncAck] request.
     /// Responds by sending a list of acks for the requested sequence number.
     pub async fn handle_sync_ack(&self, sender: &mut ProcessorLink, rel: Relation, seq_num: u64) {
-        println!("handling sync_ack request for seq_num {}", seq_num);
+        info!("handling sync_ack request for seq_num {}", seq_num);
         if let Some(changes) = self.acks.get(&seq_num) {
             print!("Found acks: ");
             let mut sync_list = Vec::new();
             for (_, ack_set) in changes {
                 sync_list.extend(ack_set.iter().cloned());
             }
-            println!("{:?}", sync_list.len());
+            info!("{:?}", sync_list.len());
             let msg = GroupMessage::Ack {
                 group_id: self.id,
                 acks: sync_list,
@@ -269,12 +270,12 @@ impl Group {
         sender: &mut ProcessorLink,
         acks: Vec<ChangeAck>,
     ) -> Vec<GroupEvent> {
-        println!("Handling {} akcs...", acks.len());
+        info!("Handling {} akcs...", acks.len());
         for ack in acks {
-            println!("Ack: seq_num={}", ack.seq_num());
+            info!("Ack: seq_num={}", ack.seq_num());
             // Check that the ack came from the group.
             if !ack.verify(&self.members) {
-                println!("Rejecting ack as invalid!");
+                info!("Rejecting ack as invalid!");
                 continue;
             }
 
@@ -360,7 +361,7 @@ impl Group {
     /// If there is no candidate, choose a new candidate if possible.
     /// If a new candidate is chosen, the acknowlegement is also sent.
     async fn select_new_candidate(&mut self, pl: &mut ProcessorLink) -> bool {
-        println!("Candidate = {:?}", self.candidate);
+        info!("Candidate = {:?}", self.candidate);
         // Only choose a new candidate if we do not have one already
         if let None = self.candidate {
             // Only choose a new candidate if there is a pending change available.
@@ -423,15 +424,15 @@ impl Group {
             ProposalAction::Vote(proposal_id, vote) => {
                 let entry = self.proposals.entry(proposal_id.clone());
                 if let Entry::Occupied(mut entry) = entry {
-                    println!("Vote entry exists");
+                    info!("Vote entry exists");
                     let (proposal, votes) = entry.get_mut();
                     if !self.members.contains(candidate_change.signatory()) {
-                        println!("Vote from non member");
+                        info!("Vote from non member");
                         return Vec::new(); // a vote must come from a member
                     }
                     votes.insert(candidate_change.signatory().clone(), *vote);
 
-                    println!("Tallying");
+                    info!("Tallying");
                     // tally the votes, and check if this proposal should resolve
                     let metadata_limit =
                         self.metadata.get(proposal.dataset_path()).unwrap_or(&0.75);
@@ -448,7 +449,7 @@ impl Group {
                     if (votes_for as f32 / self.members.len() as f32) > *metadata_limit {
                         // If this vote has passed, make the change
                         let (proposal, _) = entry.remove();
-                        println!(
+                        info!(
                             "Vote caused proposal to pass {}/{}, applying...",
                             votes_for,
                             self.members.len()
@@ -458,7 +459,7 @@ impl Group {
                     } else if (votes_against as f32 / self.members.len() as f32)
                         > (1.0 - metadata_limit)
                     {
-                        println!(
+                        info!(
                             "Vote caused proposal to fail {}/{} ({} against), removing",
                             votes_for,
                             self.members.len(),
@@ -467,7 +468,7 @@ impl Group {
                         // If this vote can no longer pass, erase it
                         entry.remove();
                     } else {
-                        println!(
+                        info!(
                             "Vote caused proposal to neither pass or fail: {}/{}",
                             votes_for,
                             self.members.len()
@@ -490,7 +491,7 @@ impl Group {
         datasets: HashMap<DatasetPath, Vec<DatasetData>>,
         metadata: HashMap<DatasetPath, f32>,
     ) {
-        println!("Handling state");
+        info!("Handling state");
         // verify this state is valid/needed
         if !self.members.contains(&rel.id) {
             return;
@@ -515,11 +516,11 @@ impl Group {
     }
 
     async fn apply_proposal(&mut self, pl: &mut ProcessorLink, proposal: Proposal) {
-        println!("Applying the proposal ");
+        info!("Applying the proposal ");
         let (path, change) = proposal.to_parts();
         match change {
             ProposalDatasetChange::AddMember(id) => {
-                println!("Adding a member");
+                info!("Adding a member");
                 self.members.insert(id.clone());
                 // Also send the invite to this new member
                 let rel = Relation::peer_from_id(id.clone());
@@ -545,7 +546,7 @@ impl Group {
                 self.datasets.insert(path, hash);
             }
             ProposalDatasetChange::AppendData(item) => {
-                println!("Appending data");
+                info!("Appending data");
                 let mut dataset = self.load_dataset(&path).await;
                 dataset.push(item);
                 let hash = self.save_dataset(&path, dataset).await;
@@ -661,7 +662,7 @@ impl Group {
             p.push(item);
         }
         p.set_extension("dat");
-        println!("Path: {}", p.display());
+        info!("Path: {}", p.display());
         // create directories above file
         create_dir_all(p.parent().unwrap()).await.unwrap();
         let mut file = OpenOptions::new()
@@ -682,9 +683,9 @@ impl Group {
 
     pub fn print(&self) {
         // Print group state
-        println!("Current seq_num {}", self.current_seq_num);
-        println!("changes count {}", self.changes.len());
-        println!("pending changes count {}", self.pending_changes.len());
+        info!("Current seq_num {}", self.current_seq_num);
+        info!("changes count {}", self.changes.len());
+        info!("pending changes count {}", self.pending_changes.len());
         let candidate = match &self.candidate {
             Some(candidate_id) => {
                 let mut s = String::new();
@@ -697,10 +698,10 @@ impl Group {
             }
             None => None,
         };
-        println!("candidate: {:?}", candidate);
-        println!("Pending changes ({})", self.pending_changes.len());
+        info!("candidate: {:?}", candidate);
+        info!("Pending changes ({})", self.pending_changes.len());
         for change in &self.pending_changes {
-            println!(
+            info!(
                 "id: {}",
                 (change % BigUint::from(1000000u32)).to_string()
             );

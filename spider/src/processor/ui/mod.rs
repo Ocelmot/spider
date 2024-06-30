@@ -1,7 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
 
+pub use message::SettingEvent;
 use spider_link::{
-    message::{Message, UiMessage, UiPageList, UiInput, AbsoluteDatasetPath, UpdateSummary},
+    message::{Message, UiMessage, UiPageList, AbsoluteDatasetPath, UpdateSummary},
     Relation, Role,
 };
 use tokio::{
@@ -64,7 +65,7 @@ struct UiProcessorState {
             HashMap<String, usize>, // Titles -> indices
             Vec<(
                 String, // Title
-                fn(u32, &String, UiInput, &mut String) -> Option<ProcessorMessage>, // Callback function
+                fn(&mut SettingEvent) -> Option<ProcessorMessage>, // Callback function
                 String, // Data
             )>
         )
@@ -164,7 +165,7 @@ impl UiProcessorState {
             UiMessage::InputFor(peripheral_id, element_id, dataset_ids, input) => {
                 // if this is for the settings page, put it there
                 if self.state.self_id().await == peripheral_id {
-                    self.settings_input(&element_id, dataset_ids, input).await;
+                    self.settings_input(rel, &element_id, dataset_ids, input).await;
                 }else{
                     // recieve an input from the ui and route it to the peripheral
                     let msg = Message::Ui(UiMessage::Input(element_id, dataset_ids, input));

@@ -1,13 +1,16 @@
 use std::collections::HashMap;
 
-use spider_link::message::{
-    DatasetData, DatasetMessage, DatasetPath, UiElement, UiElementContent, UiElementContentPart,
-    UiElementKind, UiInput, UiMessage, UiPage, UiPath,
+use spider_link::{
+    message::{
+        DatasetData, DatasetMessage, DatasetPath, UiElement, UiElementContent,
+        UiElementContentPart, UiElementKind, UiInput, UiMessage, UiPage, UiPath,
+    },
+    Relation,
 };
 
 use crate::processor::{dataset::DatasetProcessorMessage, message::ProcessorMessage};
 
-use super::UiProcessorState;
+use super::{message::SettingEvent, UiProcessorState};
 
 impl UiProcessorState {
     pub(crate) async fn init_settings(&mut self) {
@@ -37,7 +40,7 @@ impl UiProcessorState {
         header: String,
         title: String,
         inputs: Vec<(String, String)>,
-        cb: fn(u32, &String, UiInput, &mut String) -> Option<ProcessorMessage>,
+        cb: fn(&mut SettingEvent) -> Option<ProcessorMessage>,
         data: String,
     ) {
         let id = self.state.self_id().await;
@@ -276,6 +279,7 @@ impl UiProcessorState {
 
     pub(crate) async fn settings_input(
         &mut self,
+        rel: Relation,
         element_id: &String,
         dataset_ids: Vec<usize>,
         input: UiInput,
@@ -297,12 +301,10 @@ impl UiProcessorState {
                 let func_index = dataset_ids.last().unwrap(); // get innermost dataset id
                 match list.get_mut(*func_index) {
                     Some((title, func, data)) => {
-                        let msg = func(input_index, title, input, data);
-                        match msg {
-                            Some(msg) => {
-                                self.sender.send(msg).await;
-                            }
-                            None => {}
+                        let mut setting_input = SettingEvent::new(rel, input_index, title, input, data);
+                        let msg = func(&mut setting_input);
+                        if let Some(msg) = msg {
+                            self.sender.send(msg).await;
                         }
                     }
                     None => {

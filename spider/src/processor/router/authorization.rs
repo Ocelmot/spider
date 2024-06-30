@@ -1,5 +1,6 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
+use log::info;
 use spider_link::{
     message::{Message, RouterMessage, UiMessage},
     Link,
@@ -32,22 +33,22 @@ impl RouterProcessorState {
                 match entry.get("blocked") {
                     Some(blocked) => {
                         if blocked == "true" {
-                            println!("Blocked: entry in directory says block");
+                            info!("Blocked: entry in directory says block");
                             return; // blocked relations dont pend
                         } else {
-                            println!("Approved: entry in directory says no block");
+                            info!("Approved: entry in directory says no block");
                             true
                         }
                     }
                     None => {
-                        println!("Approved: entry in directory exists");
+                        info!("Approved: entry in directory exists");
                         true
                     }
                 }
             }
             // if not, add settings menu entry for approval
             None => {
-                println!("Pending: entry in directory does not exist");
+                info!("Pending: entry in directory does not exist");
                 false
             }
         };
@@ -78,15 +79,15 @@ impl RouterProcessorState {
                     ("button".to_string(), "Approve".to_string()),
                     ("button".to_string(), "Deny".to_string()),
                 ],
-                cb: |idx, _, _, data| {
-                    if idx == 0 {
+                cb: |e| {
+                    if e.index() == 0 {
                         // Approve
-                        let msg = RouterProcessorMessage::ApproveLink(data.clone());
+                        let msg = RouterProcessorMessage::ApproveLink(e.data().clone());
                         return Some(ProcessorMessage::RouterMessage(msg));
                     }
-                    if idx == 1 {
+                    if e.index() == 1 {
                         // Deny
-                        let msg = RouterProcessorMessage::DenyLink(data.clone());
+                        let msg = RouterProcessorMessage::DenyLink(e.data().clone());
                         return Some(ProcessorMessage::RouterMessage(msg));
                     }
                     None
@@ -104,6 +105,9 @@ impl RouterProcessorState {
             }
             None => {}
         }
+        // if let Some(v) = &self.veilid {
+        //     v.send(msg)
+        // }
     }
 
     pub(super) async fn deny_link_handler(&mut self, relation: String) {

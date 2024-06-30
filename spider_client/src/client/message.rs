@@ -20,6 +20,9 @@ pub enum ClientControl {
 pub enum ClientResponse {
     /// The peripheral has recieved a message from the base.
     Message(Message),
+    /// Returns the internal status of the client. This will be various
+    /// messages as it connects or disconnects.
+    Status(String),
     /// The peripheral has connected to the base.
     Connected,
     /// The peripheral has disconnected from the base.

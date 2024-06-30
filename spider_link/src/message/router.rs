@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use base64::{engine::general_purpose, Engine};
 use serde::{Serialize, Deserialize};
-use veilid_core::{PublicKey, RouteId};
+use veilid_core::{PublicKey, TypedKey};
 
 use crate::{Relation, SelfRelation};
 
@@ -72,6 +72,10 @@ pub enum RouterMessage {
     /// The n most recent chord addresses.
     ChordAddrs(Vec<String>),
 
+    /// First sent by a connected entity to indicate that Veilid is available
+    /// The Base should store this key and indicate that future connections
+    /// should use it. Finally it can reply if its own veilid is enabled.
+    VeilidEnabled(TypedKey),
     // Invitation messages
     
     /// An invite that can be sent to another node, allowing them to connect.
@@ -134,27 +138,65 @@ pub enum Invite {
     Veilid(VeilidInvite)
 }
 
+impl Invite {
+    /// Convert this invite into a string representation to send to another node.
+    pub fn to_base64(&self) -> String {
+        // let str = serde_json::to_vec(self).unwrap();
+        let str = serde_cbor::to_vec(self).unwrap();
+        general_purpose::URL_SAFE_NO_PAD.encode(str)
+    }
+
+    /// Convert this invite from a string representation sent from another node.
+    pub fn from_base64<T>(s: T) -> Option<Self> where T: AsRef<[u8]>{
+        let bytes = general_purpose::URL_SAFE_NO_PAD.decode(s).ok()?;
+        // serde_json::from_slice(&bytes).ok()
+        serde_cbor::from_slice(&bytes).ok()
+    }
+
+    /// Generate the sha 256 hash of this invite
+    pub fn sha256(&self) -> String {
+        let bytes = serde_cbor::to_vec(self).unwrap();
+        sha256::digest(bytes.as_slice())
+    }
+
+    /// Returns Some if this invite is a chord invite
+    pub fn chord(self) -> Option<()> {
+        match self {
+            Invite::Chord {  } => Some(()),
+            Invite::Veilid(_) => None,
+        }
+    }
+
+    /// Returns Some([VeilidInvite]) if this invite is a Veilid invite
+    pub fn veilid(self) -> Option<VeilidInvite> {
+        match self {
+            Invite::Chord {  } => None,
+            Invite::Veilid(invite) => Some(invite),
+        }
+    }
+}
+
 /// An invite to establish a connection via Veilid.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VeilidInvite {
     rel: Relation,
-    id: PublicKey,
-    route: Vec<u8>,
+    dht_key: TypedKey,
+    code: u64,
     signature: Vec<u8>
 }
 
 impl VeilidInvite {
     /// Create a new Veilid invite using the self relation,
     /// the id, and a generated route blob.
-    pub fn new(us: &SelfRelation, id: PublicKey, route: Vec<u8>) -> Self {
+    pub fn new(us: &SelfRelation, dht_key: TypedKey, code: u64) -> Self {
         let bytes: Vec<u8> = [
-            id.bytes.as_slice(),
-            route.as_slice()].concat();
-        let signature = us.sign(bytes);
+            dht_key.to_string().as_bytes(),
+            &code.to_be_bytes()].concat();
+        let signature = us.sign(&bytes);
         Self {
             rel: us.relation.clone(),
-            id,
-            route,
+            dht_key,
+            code,
             signature
         }
     }
@@ -165,28 +207,27 @@ impl VeilidInvite {
     }
 
     /// Returns a reference to the Veilid Public key of the invite sender.
-    pub fn id(&self) -> &PublicKey {
-        &self.id
+    pub fn dht_key(&self) -> &TypedKey {
+        &self.dht_key
     }
 
     /// Returns a reference to the blob representation of a [RouteId]
     /// to be imported by Veilid.
-    pub fn route(&self) -> &Vec<u8> {
-        &self.route
+    pub fn code(&self) -> u64 {
+        self.code
     }
 
     /// Verify that the Veilid information was sent by the enclosed [Relation].
     pub fn verify(&self) -> bool {
         let bytes: Vec<u8> = [
-            self.id.bytes.as_slice(),
-            self.route.as_slice()].concat();
+            self.dht_key.to_string().as_bytes(),
+            &self.code.to_be_bytes()].concat();
         self.rel.verify(&bytes, &self.signature)
     }
 
     /// Convert the Invite to base 64 representation
     pub fn to_base64(&self) -> String {
         let json = serde_json::to_vec(self).unwrap();
-        // general_purpose::URL_SAFE_NO_PAD.encode(self.bytes)
         general_purpose::URL_SAFE_NO_PAD.encode(json)
     }
 

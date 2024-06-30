@@ -1,5 +1,6 @@
 use std::{net::SocketAddr, str::FromStr};
 
+use log::info;
 use tokio::{net::UdpSocket, task::JoinHandle};
 
 use crate::config::SpiderConfig;
@@ -16,17 +17,17 @@ pub(crate) fn start_beacon(config: &SpiderConfig) -> JoinHandle<()> {
         let socket = UdpSocket::bind("0.0.0.0:1930").await.unwrap();
         // socket.
         loop {
-            println!("probe looping");
+            info!("probe looping");
             let (size, from) = socket.recv_from(&mut buf).await.unwrap();
 
-            println!("probe recieved: {} bytes from {}", size, from);
+            info!("probe recieved: {} bytes from {}", size, from);
             let msg = &mut buf[..size];
             let msg_txt = String::from_utf8_lossy(&msg);
-            println!("probe recieved: {}", msg_txt);
+            info!("probe recieved: {}", msg_txt);
 
             if msg == b"SPIDER_PROBE" {
                 let addr = from;
-                println! {"sending reply to {}", addr};
+                info! {"sending reply to {}", addr};
                 // it isnt always clear what the address of this device is,
                 // if it is listening on 0.0.0.0.
                 // let the other side get the address from the reply, but send

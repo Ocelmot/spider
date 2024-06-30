@@ -2,6 +2,7 @@ use std::{fs, path::Path, net::SocketAddr};
 
 use serde::{Serialize, Deserialize};
 use spider_link::{SelfRelation, Relation, Role};
+use veilid_core::{CryptoKey, CryptoTyped};
 
 
 
@@ -25,6 +26,13 @@ pub(crate) struct SpiderClientState{
 
     // Beacon 
     pub beacon_enable: bool,
+
+    // Veilid
+    pub veilid_enable: bool,
+    #[serde(default)]
+    pub own_dht: Option<CryptoTyped<CryptoKey>>,
+    #[serde(default)]
+    pub paired_dht: Option<CryptoTyped<CryptoKey>>,
 
     // Chord
     pub chord_enable: bool,
@@ -59,6 +67,11 @@ impl SpiderClientState {
 
             // Beacon 
             beacon_enable: true,
+
+            // Veilid
+            veilid_enable: true,
+            own_dht:None,
+            paired_dht: None,
 
             // Chord
             chord_enable: true,

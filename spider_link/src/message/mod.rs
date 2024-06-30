@@ -70,7 +70,9 @@ pub use group::{
 
 mod veilid;
 pub use veilid::{
-    VeilidMessage
+    VeilidFrame,
+    FrameManager,
+    VeilidMessage,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

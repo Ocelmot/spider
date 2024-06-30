@@ -1,5 +1,5 @@
 use spider_link::{
-    message::{Message, RouterMessage},
+    message::{Invite, Message, RouterMessage},
     Link, Relation, SpiderId2048,
 };
 
@@ -25,7 +25,14 @@ pub enum RouterProcessorMessage {
 
     SetName(String),
     SetNickname(Relation, String),
+    /// Set the directory entry for the [Relation] with the key [String] to the value [String]
+    SetDirectoryEntry(Relation, String, String), 
     ClearDirectoryEntry(Relation),
+
+    /// Accepts an invite recieved from the user.
+    AcceptInvite(Invite),
+    /// Revokes an invite, based on a string id that refers to that invite.
+    RevokeInvite(String),
 
     Upkeep,
 }

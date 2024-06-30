@@ -1,11 +1,12 @@
 use std::{path::{PathBuf, Path}, str::FromStr, process::Stdio, io::SeekFrom, env};
 
+use log::info;
 use rand::distributions::{Alphanumeric, DistString};
 use regex::Regex;
 use spider_link::{message::{UiInput, Message}, Keyfile};
 use tokio::{process::{Command, Child}, fs::{File, self, OpenOptions}, io::{AsyncReadExt, AsyncWriteExt, AsyncSeekExt}};
 
-use crate::processor::{message::ProcessorMessage, ui::UiProcessorMessage, router::RouterProcessorMessage};
+use crate::processor::{message::ProcessorMessage, router::RouterProcessorMessage, ui::{SettingEvent, UiProcessorMessage}};
 
 use super::{PeripheralProcessorState, PeripheralProcessorMessage, manifest::PeripheralManifest};
 
@@ -27,7 +28,7 @@ impl PeripheralProcessorState{
             .arg(addr)
             .arg(".")
             .output().await;
-        println!("{:?}", x);
+        info!("{:?}", x);
         
         // Fix for nexted crates while developing
         // if let Ok(val) = env::var("CARGO"){
@@ -63,7 +64,7 @@ impl PeripheralProcessorState{
     pub(crate) async fn launch_peripheral_service(&mut self, name: String) -> Option<Child>{
         let path = self.get_service_directory(&name);
         // let path = path.canonicalize().unwrap();
-        println!("launching peripheral: {}", path.display());
+        info!("launching peripheral: {}", path.display());
 
         let manifest = PeripheralManifest::read(&path).await?;
 
@@ -87,14 +88,14 @@ impl PeripheralProcessorState{
         };
         command.current_dir(path.clone());
 
-        println!("launching child: {}", path.display());
+        info!("launching child: {}", path.display());
         launch_child(command, Some(&path)).await
     }
 
     pub(crate) async fn make_setting_entry(&mut self, name: String, running: bool){
         let (start_stop, cb) = match running {
-            true => ("Stop".to_string(), cb_with_stop as fn(u32, &String, UiInput, &mut String) -> Option<ProcessorMessage>),
-            false => ("Start".to_string(), cb_with_start as fn(u32, &String, UiInput, &mut String) -> Option<ProcessorMessage>),
+            true => ("Stop".to_string(), cb_with_stop as fn(&mut SettingEvent) -> Option<ProcessorMessage>),
+            false => ("Start".to_string(), cb_with_start as fn(&mut SettingEvent) -> Option<ProcessorMessage>),
         };
         let msg = UiProcessorMessage::SetSetting {
             header: String::from("Peripheral Services"),
@@ -112,12 +113,12 @@ impl PeripheralProcessorState{
 
 // ===== Settings Functions ===== (Remove when updgrade settings callback handling)
 
-fn cb_with_stop(idx: u32, name: &String, input: UiInput, data: &mut String) -> Option<ProcessorMessage>{
-    match idx{
+fn cb_with_stop(e: &mut SettingEvent) -> Option<ProcessorMessage>{
+    match e.index(){
         0 => {
-            match input{
+            match e.input(){
                 UiInput::Click => {
-                    let peripheral_msg = PeripheralProcessorMessage::Stop(name.clone());
+                    let peripheral_msg = PeripheralProcessorMessage::Stop(e.title().clone());
                     let msg = ProcessorMessage::PeripheralMessage(peripheral_msg);
                     Some(msg)
                 },
@@ -125,9 +126,9 @@ fn cb_with_stop(idx: u32, name: &String, input: UiInput, data: &mut String) -> O
             }
         }
         1 => {
-            match input{
+            match e.input(){
                 UiInput::Click => {
-                    let peripheral_msg = PeripheralProcessorMessage::Remove(name.clone());
+                    let peripheral_msg = PeripheralProcessorMessage::Remove(e.title().clone());
                     let msg = ProcessorMessage::PeripheralMessage(peripheral_msg);
                     Some(msg)
                 },
@@ -138,12 +139,12 @@ fn cb_with_stop(idx: u32, name: &String, input: UiInput, data: &mut String) -> O
     }
 }
 
-fn cb_with_start(idx: u32, name: &String, input: UiInput, data: &mut String) -> Option<ProcessorMessage>{
-    match idx{
+fn cb_with_start(e: &mut SettingEvent) -> Option<ProcessorMessage>{
+    match e.index(){
         0 => {
-            match input{
+            match e.input(){
                 UiInput::Click => {
-                    let peripheral_msg = PeripheralProcessorMessage::Start(name.clone());
+                    let peripheral_msg = PeripheralProcessorMessage::Start(e.title().clone());
                     let msg = ProcessorMessage::PeripheralMessage(peripheral_msg);
                     Some(msg)
                 },
@@ -151,9 +152,9 @@ fn cb_with_start(idx: u32, name: &String, input: UiInput, data: &mut String) -> 
             }
         }
         1 => {
-            match input{
+            match e.input(){
                 UiInput::Click => {
-                    let peripheral_msg = PeripheralProcessorMessage::Remove(name.clone());
+                    let peripheral_msg = PeripheralProcessorMessage::Remove(e.title().clone());
                     let msg = ProcessorMessage::PeripheralMessage(peripheral_msg);
                     Some(msg)
                 },
@@ -179,7 +180,7 @@ pub(crate) async fn launch_child(mut command: Command, stdio_dir: Option<&Path> 
                     Some(child)
                 },
                 Err(e) => {
-                    println!("Error launching peripheral service: {}", e);
+                    info!("Error launching peripheral service: {}", e);
                     None
                 }, // ignore error for now
             }
@@ -190,7 +191,7 @@ pub(crate) async fn launch_child(mut command: Command, stdio_dir: Option<&Path> 
             match command.spawn(){
                 Ok(child) => Some(child),
                 Err(e) => {
-                    println!("Error launching peripheral service: {}", e);
+                    info!("Error launching peripheral service: {}", e);
                     None
                 },
             }

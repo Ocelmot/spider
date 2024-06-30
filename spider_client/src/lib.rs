@@ -1,25 +1,25 @@
 #![deny(missing_docs)]
 
 //! The Spider Client library provides functions to manage the connection to the base.
-//! 
+//!
 //! This library also exposes types from the Spider Link create,
-//! only one crate should need to be used. 
-//! 
+//! only one crate should need to be used.
+//!
 //! There are three or four general use patterns for a peripheral client.
 //!   - Service - the peripheral process is run as a subprocess of the base.
 //!   - Satellite - the peripheral process is run in an embedded environment.
 //!   - Standalone - the peripheral process is run as a normal application,
 //! but still connects to the base to use its features
-//! 
+//!
 //! A peripheral client may also register as a UI client to render the UI pages
 //! for the base. This is similar to the standalone use pattern.
-//! 
+//!
 //! # Usage
 //! The client must first be configured and connected to the base in order to be able to processes messages.
 //! Once the peripheral is connected, messages can then be sent and recieved.
 //! The following two sections show various examples to configure and connect
 //! to the base, and send and recieve messages respectively.
-//! 
+//!
 //! ## Configuration and connection examples
 //! This example shows how a service peripheral connects to the base.
 //! The service peripheral should save its state in a file in the current directory.
@@ -27,7 +27,7 @@
 //! address to connect to the base.
 //! The service peripheral can get the key to the base by reading a file called
 //! 'spider_keyfile.json' in the directory in which it was run.
-//! 
+//!
 //! ```
 //! #[tokio::main]
 //! async fn main() {
@@ -47,25 +47,24 @@
 //!
 //!     // Load the base's key from a keyfile if it exists.
 //!     builder.try_use_keyfile("spider_keyfile.json").await;
-//! 
+//!
 //!     // The channel is then started, and can be used to send and recv messages with the base.
 //!     let client_channel = builder.start(true);
 //!
-//!     println!("Connected");
+//!     info!("Connected");
 //! }
 //! ```
-//! 
+//!
 //! This example shows how a satellite connects to the base.
 //! ```
 //! // TODO
 //! ```
-//! 
+//!
 //! //! This example shows how a standalone connects to the base.
 //! ```
 //! // TODO
 //! ```
-//! 
-
+//!
 
 pub use spider_link::{
     beacon::{beacon_lookout_many, beacon_lookout_one},
@@ -73,7 +72,7 @@ pub use spider_link::{
 };
 
 mod client;
-pub use client::{ClientChannel, ClientResponse, SpiderClientBuilder};
+pub use client::{set_veilid_path_root, ClientChannel, ClientResponse, SpiderClientBuilder};
 
 mod state;
 use state::SpiderClientState;

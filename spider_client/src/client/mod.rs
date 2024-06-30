@@ -15,6 +15,9 @@ pub use channel::ClientChannel;
 mod message;
 pub use message::{ClientControl, ClientResponse};
 
+mod veilid_link;
+pub use veilid_link::set_veilid_path_root;
+
 /// SpiderClientBuilder contains a set of settings that can be loaded
 /// from a file, modified, saved back to a file, or used to connect
 /// to a Spider base.
@@ -75,7 +78,7 @@ impl SpiderClientBuilder {
     /// Use the configuration in the state to create a new connection to a base.
     /// Set enable_recv to true to enable recv for the resulting channel from the start.
     pub fn start(self, enable_recv: bool) -> ClientChannel {
-        let (channel, _) = SpiderClientProcessor::start(self.state_path, self.state, enable_recv);
+        let (channel, _) = SpiderClientProcessor::start_processor(self.state_path, self.state, enable_recv);
         channel
     }
 

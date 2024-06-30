@@ -1,6 +1,7 @@
 use std::io::Error;
 use std::{path::Path, time::Duration};
 
+use log::info;
 use spider_link::message::Message;
 use spider_link::Keyfile;
 use tokio::fs;
@@ -196,7 +197,7 @@ impl Processor {
                 header: String::from("System"),
                 title: id,
                 inputs: vec![],
-                cb: |_, _, _, _| None,
+                cb: |_| None,
                 data: String::new(),
             };
             self.ui.send(msg).await;
@@ -206,7 +207,7 @@ impl Processor {
                 header: String::from("System"),
                 title: String::from("Exit!"),
                 inputs: vec![("button".to_string(), "Exit".to_string())],
-                cb: |idx, title, input, _| {
+                cb: |_| {
                     std::process::exit(0);
                 },
                 data: String::new(),
@@ -239,11 +240,11 @@ impl Processor {
                 let message = self.receiver.recv().await;
                 let message = if let Some(message) = message {
                     if self.print_msg {
-                        println!("processing message: {:?}", message);
+                        info!("processing message: {:?}", message);
                     }
                     message
                 } else {
-                    println!("recieved no message, closing...");
+                    info!("recieved no message, closing...");
                     break; // we did not get a message, all senders have quit, we should too.
                            // we could restart the listener, maybe.
                 };

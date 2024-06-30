@@ -191,9 +191,9 @@ impl RouterProcessorState{
                 ("textentry".into(), "Rename".into()),
                 ("button".into(), "Remove".into()),
             ],
-            cb: |idx, name, input, data|{
-                let rel = serde_json::from_str(data).unwrap();
-                match input{
+            cb: |e|{
+                let rel = serde_json::from_str(e.data()).unwrap();
+                match e.input(){
                     UiInput::Click => {
                         // only button will send click
                         let router_msg = RouterProcessorMessage::ClearDirectoryEntry(rel);
@@ -202,7 +202,7 @@ impl RouterProcessorState{
                     },
                     UiInput::Text(name) => {
                         // only textentry will send text
-                        let router_msg = RouterProcessorMessage::SetNickname(rel, name);
+                        let router_msg = RouterProcessorMessage::SetNickname(rel, name.clone());
                         let msg = ProcessorMessage::RouterMessage(router_msg);
                         Some(msg)
                     },

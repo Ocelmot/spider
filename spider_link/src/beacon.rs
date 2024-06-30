@@ -4,6 +4,7 @@
 
 use std::time::Duration;
 
+use log::info;
 use tokio::{
     net::UdpSocket,
     time::{timeout, Instant},
@@ -12,12 +13,12 @@ use tokio::{
 /// Broadcast a request over the local network for any base that is
 /// listening. The IP address of the first response recieved is returned.
 /// This function will timeout after 10 seconds.
-pub async fn beacon_lookout_one() -> Option<String> {
+pub async fn beacon_lookout_one(limit: Duration) -> Option<String> {
     let socket = UdpSocket::bind("0.0.0.0:1929").await.unwrap();
     beacon_probe_send(&socket).await;
 
     let start = Instant::now();
-    let limit = Duration::from_secs(10);
+    // let limit = Duration::from_secs(10);
     let mut remaining = limit.saturating_sub(start.elapsed());
     while remaining > Duration::ZERO {
         let res = beacon_response_recv(&socket, remaining).await;
@@ -52,7 +53,7 @@ pub async fn beacon_lookout_many(limit: Duration) -> Vec<String> {
 
 async fn beacon_probe_send(socket: &UdpSocket) {
     socket.set_broadcast(true);
-    println!("Probing for spiders...");
+    info!("Probing for spiders...");
     socket
         .send_to(b"SPIDER_PROBE", "255.255.255.255:1930")
         .await;
@@ -64,10 +65,10 @@ async fn beacon_response_recv(socket: &UdpSocket, duration: Duration) -> Option<
         loop {
             let (size, from) = socket.recv_from(&mut buf).await.unwrap();
 
-            println!("probe recieved: {} bytes from {}", size, from);
+            info!("probe recieved: {} bytes from {}", size, from);
             let msg = &mut buf[..size];
             let msg_txt = String::from_utf8_lossy(&msg);
-            println!("probe recieved: {}", msg_txt);
+            info!("probe recieved: {}", msg_txt);
 
             let parts = msg_txt.split(':').collect::<Vec<_>>();
             if parts.len() < 2 {

@@ -21,9 +21,10 @@ use std::sync::Arc;
 
 use base64::{engine::general_purpose, Engine};
 use rsa::{
-    pkcs1v15::{Signature, SigningKey, VerifyingKey},
+    pkcs1v15::{DecryptingKey, EncryptingKey, Signature, SigningKey, VerifyingKey},
     pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey},
     signature::{SignatureEncoding, Signer, Verifier},
+    traits::{RandomizedDecryptor, RandomizedEncryptor},
     RsaPrivateKey,
 };
 use serde::{Deserialize, Serialize};
@@ -172,6 +173,17 @@ impl Relation {
         sha256::digest(bytes.as_slice())
     }
 
+    /// Use the public key in this relation to encrypt some data to send.
+    pub fn encrypt(&self, data: &Vec<u8>) -> Vec<u8> {
+        let key = self.id.as_pub_key().unwrap();
+        let encrypting_key = EncryptingKey::new(key);
+
+        let mut rng = rand::thread_rng();
+        encrypting_key
+            .encrypt_with_rng(&mut rng, &data)
+            .expect("failed to decrypt")
+    }
+
     /// Use the public key in this relation to verify some data against a signature.
     pub fn verify(&self, data: &Vec<u8>, sig: &Vec<u8>) -> bool {
         let key = self.id.as_pub_key().unwrap();
@@ -241,12 +253,26 @@ impl SelfRelation {
         Link::listen(self.clone(), addr)
     }
 
+    /// Use the public key in this relation to decrypt some data.
+    pub fn decrypt(&self, data: &Vec<u8>) -> Option<Vec<u8>> {
+        let key = self.private_key();
+        let decrypting_key = DecryptingKey::new(key);
+
+        let mut rng = rand::thread_rng();
+        decrypting_key.decrypt_with_rng(&mut rng, data).ok()
+    }
+
+    /// Use the private key in this SelfRelation to encrypt some data.
+    pub fn encrypt(&self, data: &Vec<u8>) -> Vec<u8> {
+        self.relation.encrypt(data)
+    }
+
     /// Sign some data using the private key within this SelfRelation.
     /// Returs the signature in byte form.
-    pub fn sign(&self, data: Vec<u8>) -> Vec<u8>{
+    pub fn sign(&self, data: &Vec<u8>) -> Vec<u8> {
         let key = self.private_key();
         let signing_key = SigningKey::<Sha256>::new(key);
-        signing_key.sign(&data).to_vec()
+        signing_key.sign(data).to_vec()
     }
 
     /// Verify a signature produced by this SelfRelation using the public

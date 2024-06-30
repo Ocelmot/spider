@@ -10,6 +10,7 @@ use chacha20poly1305::{
     aead::{Aead, OsRng},
     ChaCha20Poly1305, Key, KeyInit, Nonce,
 };
+use log::{error, info};
 use rand::RngCore;
 use rsa::Pkcs1v15Encrypt;
 use serde_json::{error::Category, Deserializer};
@@ -23,7 +24,6 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::error;
 
 use crate::{
     message::{Frame, KeyRequest, Message, Protocol},
@@ -36,6 +36,9 @@ use crate::{
 pub struct Link {
     self_relation: SelfRelation,
     other_relation: Relation,
+
+    local_addr: String,
+    peer_addr: String,
 
     out_tx: Sender<Message>,
     in_rx: Option<Receiver<Message>>,
@@ -56,18 +59,18 @@ impl Link {
         if let Ok(connection) = TcpStream::connect(addr).await {
             let mut lb = LinkBuilder::from_stream(own_relation, connection);
             lb.set_other_relation(Some(relation));
-            // println!("connect sending stream config");
+            // info!("connect sending stream config");
             lb.send_stream_config().await;
-            // println!("connect sent stream config");
-            // println!("connect sending introduction");
+            // info!("connect sent stream config");
+            // info!("connect sending introduction");
             lb.send_introduction().await;
-            // println!("connect sent introduction");
-            // println!("connect reading stream config");
+            // info!("connect sent introduction");
+            // info!("connect reading stream config");
             lb.read_stream_config(&None).await;
-            // println!("connect read stream config");
-            // println!("connect reading introduction");
+            // info!("connect read stream config");
+            // info!("connect reading introduction");
             lb.read_introduction().await;
-            // println!("connect read introduction");
+            // info!("connect read introduction");
             // process stream
             return Some(lb.process().await);
         }
@@ -102,21 +105,21 @@ impl Link {
                 let local_kr = kr.clone();
                 tokio::spawn(async move {
                     let mut lb = LinkBuilder::from_stream(local_own_relation, stream);
-                    // println!("listen reading stream config");
+                    // info!("listen reading stream config");
                     let done = lb.read_stream_config(&&local_kr.lock().await).await;
                     if done {
                         return;
                     }
-                    // println!("listen read stream config");
-                    // println!("listen reading introduction");
+                    // info!("listen read stream config");
+                    // info!("listen reading introduction");
                     lb.read_introduction().await;
-                    // println!("listen read introduction");
-                    // println!("listen sending stream config");
+                    // info!("listen read introduction");
+                    // info!("listen sending stream config");
                     lb.send_stream_config().await;
-                    // println!("listen sent stream config");
-                    // println!("listen sending introduction");
+                    // info!("listen sent stream config");
+                    // info!("listen sending introduction");
                     lb.send_introduction().await;
-                    // println!("listen sent introduction");
+                    // info!("listen sent introduction");
                     // process stream,
                     let link = lb.process().await;
                     // emit Link on channel,
@@ -153,6 +156,16 @@ impl Link {
     /// Returns the remote Relation of this Link
     pub fn other_relation(&self) -> &Relation {
         &self.other_relation
+    }
+
+    /// Return the local address used to establish this Link
+    pub fn local_addr(&self) -> &String {
+        &self.local_addr
+    }
+
+    /// Return the peer address used to establish this Link
+    pub fn peer_addr(&self) -> &String {
+        &self.peer_addr
     }
 
     /// Sends a Message through the link
@@ -220,7 +233,7 @@ impl LinkBuilder {
     }
 
     async fn send_stream_config(&mut self) {
-        //println!("sending stream config");
+        //info!("sending stream config");
         let mut raw_data = Vec::new();
         raw_data.extend_from_slice(&self.own_key);
         raw_data.extend_from_slice(&self.own_nonce);
@@ -243,11 +256,11 @@ impl LinkBuilder {
             enc_data
         };
         self.write_frame(data).await;
-        // println!("sent stream config");
+        // info!("sent stream config");
     }
 
     async fn read_stream_config(&mut self, enable_key_request: &Option<String>) -> bool {
-        //println!("reading stream config");
+        //info!("reading stream config");
         let enc_data = if let Some(enc_data) = self.read_frame().await {
             enc_data
         } else {
@@ -281,7 +294,7 @@ impl LinkBuilder {
         let stream_nonce: [u8; 12] = dec_data[32..(32 + 12)].try_into().expect("wrong length");
         self.other_key = Some(stream_key);
         self.other_nonce = Some(stream_nonce);
-        // println!("saved stream config");
+        // info!("saved stream config");
         return false;
     }
 
@@ -295,7 +308,7 @@ impl LinkBuilder {
     }
 
     async fn send_introduction(&mut self) {
-        //println!("sending introduction");
+        //info!("sending introduction");
         // serialize introduction message (stream encryption)
         let intro = Protocol::Introduction {
             id: self.own_relation.relation.id.clone(),
@@ -309,12 +322,12 @@ impl LinkBuilder {
     }
 
     async fn read_introduction(&mut self) {
-        //println!("reading introduction");
+        //info!("reading introduction");
         // read packet data
         let enc_data = if let Some(enc_data) = self.read_frame().await {
             enc_data
         } else {
-            eprintln!("Failed to read frame!");
+            error!("Failed to read frame!");
             self.stream.shutdown().await;
             return;
         };
@@ -329,19 +342,19 @@ impl LinkBuilder {
             let other_rel = Relation { id, role };
             match &self.other_relation {
                 Some(existing_other) => {
-                    println!("other relation exists: {:?}", other_rel);
+                    info!("other relation exists: {:?}", other_rel);
                     if *existing_other != other_rel {
-                        println!("other relation differs from current self");
+                        info!("other relation differs from current self");
                         // error has occured, this is not who we expected to connect to, close
                         self.stream.shutdown().await;
                         return;
                     } else {
-                        // println!("other relation equals current self");
+                        // info!("other relation equals current self");
                     }
                 }
                 None => {
                     self.other_relation = Some(other_rel);
-                    // println!("Other relation recieved!")
+                    // info!("Other relation recieved!")
                 }
             }
         } else {
@@ -428,6 +441,9 @@ impl LinkBuilder {
         let own_relation = self.own_relation.clone();
         let other_relation = self.other_relation.clone().unwrap();
 
+        let local_addr = self.stream.local_addr().unwrap().to_string();
+        let peer_addr = self.stream.peer_addr().unwrap().to_string();
+
         let (out_tx, mut out_rx) = channel(50);
         let (in_tx, in_rx) = channel(50);
 
@@ -471,7 +487,7 @@ impl LinkBuilder {
                         let protocol = Protocol::Message(msg);
                         let raw_data = serde_json::ser::to_vec(&protocol);
                         if raw_data.is_err(){
-                            eprintln!("Protocol error: {:?}", protocol);
+                            error!("Protocol error: {:?}", protocol);
                         }
                         let raw_data = raw_data.expect("Failed to serialize struct");
                         // encrypt using stream cypher here
@@ -485,8 +501,13 @@ impl LinkBuilder {
         Link {
             self_relation: own_relation,
             other_relation,
+
+            local_addr,
+            peer_addr,
+
             out_tx,
             in_rx: Some(in_rx),
+
             notify_exit: notify_exit_copy,
             handle,
         }

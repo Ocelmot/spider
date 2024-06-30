@@ -6,3 +6,4 @@
 /spider/peripherals
 /spider/groups
 *.base64
+.veilid

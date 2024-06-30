@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use log::info;
 use spider_link::{Relation, message::{DatasetData, RouterMessage, Message}};
 
 use super::RouterProcessorState;
@@ -16,7 +17,7 @@ impl RouterProcessorState{
             if recipients.contains(&external){
                 continue; // this recipient already recieved message via subscription
             }
-            println!("Sending message to external...");
+            info!("Sending message to external...");
             let router_msg = RouterMessage::Event(name.clone(), from.clone(), data.clone());
             let msg = Message::Router(router_msg);
             self.send_msg(external, msg).await;
