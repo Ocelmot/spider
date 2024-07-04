@@ -2,8 +2,9 @@
 *.log
 *.json
 *.dat
-/spider/datasets
-/spider/peripherals
-/spider/groups
+datasets/
+peripherals/
+groups/
 *.base64
 .veilid
+.DS_Store
