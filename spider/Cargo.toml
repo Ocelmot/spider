@@ -7,7 +7,7 @@ default-run = "spider"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-dht_chord = { git = "https://github.com/Ocelmot/chord_dht" }
+dht_chord = { git = "https://github.com/Ocelmot/chord_dht", rev = "3c3cbb88042d5e2c3c3f27aa96a596b7222433c9" }
 spider_link = { git = "https://github.com/Ocelmot/spider" }
 
 tokio = { version = "1", features = ["full"] }
@@ -34,7 +34,7 @@ rand = "0.8.5"
 
 regex = "1.8.1"
 
-num-bigint = {version = "0.4.3", features = ["serde"]}
+num-bigint = { version = "0.4.3", features = ["serde"] }
 bimap = "0.6.3"
 log = "0.4.21"
 simple_logger = "5.0.0"
