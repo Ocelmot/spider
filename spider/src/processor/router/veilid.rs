@@ -5,8 +5,8 @@ use log::{debug, error, info};
 use rand::Rng;
 use spider_link::{
     message::{
-        FrameManager, Invite, Message, RouterMessage, UiInput, VeilidFrame, VeilidInvite,
-        VeilidMessage,
+        DirectoryEntry, FrameManager, Invite, Message, RouterMessage, UiInput, VeilidFrame,
+        VeilidInvite, VeilidMessage,
     },
     Relation,
 };
@@ -312,9 +312,22 @@ impl VeilidProcessorState {
             VeilidMessage::CompleteInvite { dht_key, code } => {
                 info!("completing invite");
                 // test if the code is valid, if so add dht/rel to lists
-                if self.remove_pending_invite(code).await {
+                if self.remove_invite_from_settings(code).await {
                     info!("found invite code, storing dht information");
                     self.store_outgoing_dht(&rel, dht_key).await;
+                    // Inform directory of new relation
+                    let msg = RouterProcessorMessage::SetDirectoryEntry(
+                        rel.clone(),
+                        "veilid_enabled".into(),
+                        "true".into(),
+                    );
+                    let msg = ProcessorMessage::RouterMessage(msg);
+                    self.pl.send(msg).await;
+                    // Send name to peer
+                    let name = self.pl.state().name().await.clone();
+                    let msg = RouterMessage::SetIdentityProperty("name".into(), name);
+                    let msg = Message::Router(msg);
+                    self.handle_route_message(rel, msg).await;
                 } else {
                     info!("No such invite code, rejecting invite completion");
                 }
@@ -433,6 +446,19 @@ impl VeilidProcessorState {
                 // add the details to our lists
                 self.store_outgoing_dht(invite.rel(), *dht_key).await;
                 self.outgoing_routes.insert(invite.rel().clone(), route_id);
+                // Add to directory
+                let msg = RouterProcessorMessage::SetDirectoryEntry(
+                    invite.rel().clone(),
+                    "veilid_enabled".into(),
+                    "true".into(),
+                );
+                let msg = ProcessorMessage::RouterMessage(msg);
+                self.pl.send(msg).await;
+                // send our name to peer
+                let name = self.pl.state().name().await.clone();
+                let msg = RouterMessage::SetIdentityProperty("name".into(), name);
+                let msg = Message::Router(msg);
+                self.handle_route_message(invite.rel().clone(), msg).await;
             } else {
                 info!("failed to import private route blob");
             }
@@ -507,7 +533,7 @@ impl VeilidProcessorState {
                             {
                                 if Some(route_id) == self.load_expired_route_id(&rel).await {
                                     None
-                                }else {
+                                } else {
                                     info!("Imported private route");
                                     // store the route for next message
                                     info!("message sent, storing new route_id");
@@ -535,14 +561,13 @@ impl VeilidProcessorState {
                 debug!("found route_id!");
                 break route_id;
             }
-            if tries >= limit{
+            if tries >= limit {
                 debug!("Number of tries exceeded");
                 return;
             }
             tokio::time::sleep(Duration::from_secs(8)).await;
             tries += 1;
         };
-        
 
         // Send message
         let frames = VeilidFrame::new_wrapped_msg(&us, msg);
@@ -551,7 +576,11 @@ impl VeilidProcessorState {
             println!("frame data length: {}", frame.data_len());
             let data = serde_json::to_vec(&frame).unwrap();
             println!("frame serialized length: {}", data.len());
-            println!("sending frame {} of {} in sequence", frame.index(), frame.count());
+            println!(
+                "sending frame {} of {} in sequence",
+                frame.index(),
+                frame.count()
+            );
             let res = routing
                 .app_message(Target::PrivateRoute(route_id), data)
                 .await;
@@ -660,7 +689,7 @@ impl VeilidProcessorState {
         Invite::Veilid(invite)
     }
 
-    async fn remove_invite_from_settings(&mut self, code: u64) {
+    async fn remove_invite_from_settings(&mut self, code: u64) -> bool {
         // remove the entry from the veilid list, getting the route blob
         if self.remove_pending_invite(code).await {
             // Remove it from the settings list
@@ -669,6 +698,9 @@ impl VeilidProcessorState {
                 title: format!("Veilid Invite: {}", code),
             };
             self.pl.send_ui(msg).await;
+            true
+        } else {
+            false
         }
     }
 
@@ -725,7 +757,9 @@ impl VeilidProcessorState {
             .table_store()
             .expect("Veilid api should be started");
         let table = store.open("expired_routes", 1).await.unwrap();
-        table.store_json(0, rel.sha256().as_bytes(), &route_id).await;
+        table
+            .store_json(0, rel.sha256().as_bytes(), &route_id)
+            .await;
     }
 
     /// Loads the expired route_id for this relation
