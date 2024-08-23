@@ -3575,6 +3575,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "veilid-core",
+ "veilid-tools",
 ]
 
 [[package]]
@@ -3591,6 +3592,7 @@ dependencies = [
  "tokio",
  "tracing",
  "veilid-core",
+ "veilid-tools",
 ]
 
 [[package]]
@@ -3614,6 +3616,7 @@ dependencies = [
  "tracing",
  "uuid",
  "veilid-core",
+ "veilid-tools",
 ]
 
 [[package]]
