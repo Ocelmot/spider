@@ -32,6 +32,7 @@ fn veilid_config() -> VeilidConfigInner {
         namespace: "spider".into(),
         protected_store: VeilidConfigProtectedStore {
             directory: "./.veilid/block_store".into(),
+            allow_insecure_fallback: true,
             ..Default::default()
         },
         block_store: VeilidConfigBlockStore {

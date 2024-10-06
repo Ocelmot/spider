@@ -30,3 +30,6 @@ chacha20poly1305 = "0.10.0"
 rand = "0.8.5"
 uuid = {version = "1.8.0", features = ["v4", "serde"]}
 log = "0.4.21"
+
+network-interface = "2.0.0"
+futures = "0.3.31"
