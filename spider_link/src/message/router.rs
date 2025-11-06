@@ -1,13 +1,10 @@
-use std::collections::HashMap;
-
 use base64::{engine::general_purpose, Engine};
-use serde::{Serialize, Deserialize};
-use veilid_core::{PublicKey, TypedKey};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::{Relation, SelfRelation};
 
 use super::DatasetData;
-
 
 /// RouterMessage manages the relationship between the two members of the Spider
 /// network. There are four general categories of messages of this type:
@@ -37,6 +34,9 @@ pub enum RouterMessage {
     /// closed after this.
     Denied,
 
+    /// A list of addresses that could be used to connect to this node
+    Addrs(Vec<String>),
+
     // Event messages
     /// Send a message with a type, a set of recipients, and some data.
     SendEvent(String, Vec<Relation>, DatasetData),
@@ -62,94 +62,93 @@ pub enum RouterMessage {
     /// identity properties.
     SetIdentityProperty(String, String),
 
-    // Chord messages
-    /// Request to receive the n most recent addresses in the base's chord in
-    /// order to allow peripherals to use the chord to connect to lookup the
-    /// base's address.
-    SubscribeChord(usize),
-    /// Request to stop receiving recent chord addresses from the base.
-    UnsubscribeChord,
-    /// The n most recent chord addresses.
-    ChordAddrs(Vec<String>),
-
-    /// First sent by a connected entity to indicate that Veilid is available
-    /// The Base should store this key and indicate that future connections
-    /// should use it. Finally it can reply if its own veilid is enabled.
-    VeilidEnabled(TypedKey),
     // Invitation messages
-    
     /// An invite that can be sent to another node, allowing them to connect.
     Invite(Invite),
-    
+
     /// Request that an invite of the indicated type be sent to the peripheral.
     /// This is so that it can be exchanged to another node to connect.
-    GenerateInvite(InviteType),
+    GenerateInvite,
 }
 
 /// A DirectoryEntry holds details about some other member of the
 /// spider network.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DirectoryEntry{
+pub struct DirectoryEntry {
     relation: Relation,
     properties: HashMap<String, String>,
 }
 
-impl DirectoryEntry{
+impl DirectoryEntry {
     /// Create a new, empty DirectoryEntry for the provided [Relation].
-    pub fn new(rel: Relation) -> Self{
-        Self{
+    pub fn new(rel: Relation) -> Self {
+        Self {
             relation: rel,
             properties: HashMap::new(),
         }
     }
 
     /// Get the [Relation] this DirectoryEntry describes.
-    pub fn relation(&self)-> &Relation {
+    pub fn relation(&self) -> &Relation {
         &self.relation
     }
 
     /// Get the value of one of the properties in this DirectoryEntry.
-    pub fn get(&self, key: &str)-> Option<&String> {
+    pub fn get(&self, key: &str) -> Option<&String> {
         self.properties.get(key)
     }
 
     /// Set the value of one of the properties in this DirectoryEntry.
-    pub fn set(&mut self, key: String, value: String){
+    pub fn set(&mut self, key: String, value: String) {
         self.properties.insert(key, value);
     }
 }
 
-/// Used to indicate which type of invite to generate
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum InviteType {
-    /// A request to create an invite to a chord this node is a member of.
-    Chord,
-    /// A request to create an invite describing how to connect to the node
-    /// through Veilid.
-    Veilid,
-}
-
 /// An invite to establish a connection to some other base node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Invite {
-    /// The invite describes a chord to join
-    Chord{},
-    /// The invite describes how to use Veilid to communicate.
-    Veilid(VeilidInvite)
+pub struct Invite {
+    rel: Relation,
+    addrs: Vec<String>,
+    invite_code: String,
 }
 
 impl Invite {
+    /// Create a new Invite to establish a connection to this node.
+    pub fn new(self_rel: &SelfRelation, addrs: Vec<String>, invite_code: String) -> Self {
+        Self {
+            rel: self_rel.relation.clone(),
+            addrs,
+            invite_code,
+        }
+    }
+
+    /// Get a reference to this Invite's Relation
+    pub fn rel(&self) -> &Relation {
+        &self.rel
+    }
+
+    /// Get a reference to this Invite's list of addresses
+    pub fn addrs(&self) -> &Vec<String> {
+        &self.addrs
+    }
+
+    /// Get a reference to this Invite's invite code
+    pub fn invite_code(&self) -> &String {
+        &self.invite_code
+    }
+
     /// Convert this invite into a string representation to send to another node.
     pub fn to_base64(&self) -> String {
-        // let str = serde_json::to_vec(self).unwrap();
-        let str = serde_cbor::to_vec(self).unwrap();
-        general_purpose::URL_SAFE_NO_PAD.encode(str)
+        let bytes = serde_cbor::to_vec(self).unwrap();
+        general_purpose::URL_SAFE_NO_PAD.encode(bytes)
     }
 
     /// Convert this invite from a string representation sent from another node.
-    pub fn from_base64<T>(s: T) -> Option<Self> where T: AsRef<[u8]>{
+    pub fn from_base64<T>(s: T) -> Option<Self>
+    where
+        T: AsRef<[u8]>,
+    {
         let bytes = general_purpose::URL_SAFE_NO_PAD.decode(s).ok()?;
-        // serde_json::from_slice(&bytes).ok()
         serde_cbor::from_slice(&bytes).ok()
     }
 
@@ -158,82 +157,41 @@ impl Invite {
         let bytes = serde_cbor::to_vec(self).unwrap();
         sha256::digest(bytes.as_slice())
     }
-
-    /// Returns Some if this invite is a chord invite
-    pub fn chord(self) -> Option<()> {
-        match self {
-            Invite::Chord {  } => Some(()),
-            Invite::Veilid(_) => None,
-        }
-    }
-
-    /// Returns Some([VeilidInvite]) if this invite is a Veilid invite
-    pub fn veilid(self) -> Option<VeilidInvite> {
-        match self {
-            Invite::Chord {  } => None,
-            Invite::Veilid(invite) => Some(invite),
-        }
-    }
 }
 
-/// An invite to establish a connection via Veilid.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VeilidInvite {
-    rel: Relation,
-    dht_key: TypedKey,
-    code: u64,
-    signature: Vec<u8>
-}
+#[cfg(test)]
+mod tests {
 
-impl VeilidInvite {
-    /// Create a new Veilid invite using the self relation,
-    /// the id, and a generated route blob.
-    pub fn new(us: &SelfRelation, dht_key: TypedKey, code: u64) -> Self {
-        let bytes: Vec<u8> = [
-            dht_key.to_string().as_bytes(),
-            &code.to_be_bytes()].concat();
-        let signature = us.sign(&bytes);
-        Self {
-            rel: us.relation.clone(),
-            dht_key,
-            code,
-            signature
-        }
-    }
+    // use rand::random;
+    // use tracing::info;
+    // use tracing_test::traced_test;
+    // use veilid_core::{CryptoKey, FourCC, TypedKey};
 
-    /// Returns a reference to the [Relation] the invite is from.
-    pub fn rel(&self) -> &Relation {
-        &self.rel
-    }
+    // use crate::SelfRelation;
 
-    /// Returns a reference to the Veilid Public key of the invite sender.
-    pub fn dht_key(&self) -> &TypedKey {
-        &self.dht_key
-    }
+    // use super::*;
 
-    /// Returns a reference to the blob representation of a [RouteId]
-    /// to be imported by Veilid.
-    pub fn code(&self) -> u64 {
-        self.code
-    }
+    // Test the invite's roundtrip with other means
+    // #[test]
+    // #[traced_test]
+    // fn invite_round_trip() {
+    //     let rel = SelfRelation::debug_get(5).relation;
+    //     let key = CryptoKey::new(random());
+    //     let typed_key = TypedKey::new(FourCC::default(), key);
+    //     let addrs = vec![typed_key.to_string()];
+    //     let invite_code = String::from("test invite code");
+    //     let invite = Invite {
+    //         rel,
+    //         addrs,
+    //         invite_code,
+    //     };
 
-    /// Verify that the Veilid information was sent by the enclosed [Relation].
-    pub fn verify(&self) -> bool {
-        let bytes: Vec<u8> = [
-            self.dht_key.to_string().as_bytes(),
-            &self.code.to_be_bytes()].concat();
-        self.rel.verify(&bytes, &self.signature)
-    }
+    //     let serialized = invite.to_base64();
+    //     info!("serialized: {}", serialized);
+    //     let deserialized = Invite::from_base64(serialized).expect("deserialization should succeed");
 
-    /// Convert the Invite to base 64 representation
-    pub fn to_base64(&self) -> String {
-        let json = serde_json::to_vec(self).unwrap();
-        general_purpose::URL_SAFE_NO_PAD.encode(json)
-    }
-
-    /// Construct an Invite from the base 64 representation
-    pub fn from_base64(str: String) -> Option<Self> {
-        let slice = general_purpose::URL_SAFE_NO_PAD.decode(str).ok()?;
-        serde_json::from_slice(&slice).ok()
-    }
+    //     assert_eq!(invite.rel, deserialized.rel);
+    //     assert_eq!(invite.addrs, deserialized.addrs);
+    //     assert_eq!(invite.invite_code, deserialized.invite_code);
+    // }
 }

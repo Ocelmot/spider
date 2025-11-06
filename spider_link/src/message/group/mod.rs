@@ -62,7 +62,7 @@ pub enum GroupMessage {
         change: ChangeAnnounce,
     },
 
-    /// Inform a node about some change acknowlegements.
+    /// Inform a node about some change acknowledgements.
     Ack {
         /// The group the updates apply to
         group_id: GroupId,

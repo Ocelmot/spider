@@ -19,6 +19,12 @@ pub struct SpiderConfig {
     #[serde(default)]
     pub keyfile_path: Option<String>,
 
+    #[serde(default = "default_true")]
+    enable_key_req: bool,
+
+    #[serde(default = "default_true")]
+    enable_beacon: bool,
+
     // No peripheral configurations
     #[serde(default)]
     peripheral_path: Option<String>,
@@ -40,8 +46,12 @@ impl SpiderConfig {
     pub fn from_file(path: &Path) -> Self {
         let data = match fs::read_to_string(&path) {
             Ok(str) => str,
-            Err(_) => String::from("{}"),
+            Err(e) => {
+                eprintln!("Error loading config, using defaults. Error: {e}");
+                String::from("{}")
+            },
         };
+        // println!("Loaded config data: {}", data);
         // let data = fs::read_to_string(&path).expect(&format!("Failed to read config file: {:?}", path));
         let config = serde_json::from_str(&data).expect("Failed to deserialize config");
         config
@@ -71,9 +81,25 @@ impl SpiderConfig {
     pub fn veilid_enabled(&self) -> bool {
         self.veilid_enabled.unwrap_or_else(default_veilid_enabled)
     }
+
+    pub fn key_req_enabled(&self) -> bool {
+        self.enable_key_req
+    }
+
+    pub fn beacon_enabled(&self) -> bool {
+        self.enable_beacon
+    }
 }
 
 // Defaults
+fn default_true() -> bool{
+    true
+}
+
+fn default_false() -> bool{
+    false
+}
+
 fn default_listen_addr() -> String {
     "0.0.0.0:1930".into()
 }

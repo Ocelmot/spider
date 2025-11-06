@@ -1,6 +1,6 @@
 use std::{path::{PathBuf, Path}, str::FromStr, process::Stdio, io::SeekFrom, env};
 
-use log::info;
+use tracing::info;
 use rand::distributions::{Alphanumeric, DistString};
 use regex::Regex;
 use spider_link::{message::{UiInput, Message}, Keyfile};
@@ -56,7 +56,7 @@ impl PeripheralProcessorState{
         let permission_code: String =  Alphanumeric.sample_string(&mut rand::thread_rng(), 10);
         Keyfile::write_new(path, id, Some(permission_code.clone())).await;
 
-        let msg = RouterProcessorMessage::SetApprovalCode(permission_code);
+        let msg = RouterProcessorMessage::AddApprovalCode(permission_code);
         let msg = ProcessorMessage::RouterMessage(msg);
         self.sender.send(msg).await;
     }

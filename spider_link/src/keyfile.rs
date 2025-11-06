@@ -2,8 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::SpiderId2048;
-
+use crate::{error::ProblemWrap, LinkResult, SpiderId2048};
 
 /// A Keyfile is used to transfer connection parameters from the base to a
 /// peripheral to establish a connection to the base. It only needs to be
@@ -28,21 +27,27 @@ impl Keyfile {
         }
     }
 
-    /// Writes a Keyfile to the given path using the constituant
+    /// Writes a Keyfile to the given path using the constituent
     /// parts of the keyfile.
-    pub async fn write_new(path: PathBuf, id: SpiderId2048, permission_code: Option<String>) {
+    pub async fn write_new(
+        path: PathBuf,
+        id: SpiderId2048,
+        permission_code: Option<String>,
+    ) -> LinkResult {
         let keyfile = Self {
             id,
             permission_code,
         };
-        keyfile.write_to_file(path).await;
+        keyfile.write_to_file(path).await
     }
 
     /// Writes a keyfile out to a path
-    pub async fn write_to_file<P>(&self, path: P) where
-    P: AsRef<Path>,{
+    pub async fn write_to_file<P>(&self, path: P) -> LinkResult
+    where
+        P: AsRef<Path>,
+    {
         let data = serde_json::to_string(&self).unwrap();
-        tokio::fs::write(path, data).await;
+        tokio::fs::write(path, data).await.wrap()
     }
 
     /// Reads a keyfile from a path, returns None if there was an error.

@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use veilid_core::DHTRecordDescriptor;
 
 use rsa::{
     pkcs8::{DecodePrivateKey, EncodePrivateKey},
@@ -14,11 +15,9 @@ use rsa::{
 
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
 
-use crate::processor::ChordState;
-
 #[derive(Debug, Clone)]
 pub struct StateData {
-    // Aquire locks in struct order.
+    // Acquire locks in struct order.
     filename: Arc<Mutex<PathBuf>>,
     inner: Arc<Mutex<StateDataInner>>,
 }
@@ -68,7 +67,7 @@ impl StateData {
         SelfRelation::from_key(key, Role::Peer)
     }
 
-    // Pheripheral Items
+    // Peripheral Items
     pub async fn peripheral_services(&self) -> MappedMutexGuard<'_, HashMap<String, bool>> {
         let inner = self.inner.lock().await;
         MutexGuard::map(inner, |f| &mut f.peripheral_services)
@@ -80,43 +79,13 @@ impl StateData {
         // inner.name.as_ref().unwrap_or(&String::from("No Name"))
         MutexGuard::map(inner, |i| i.name.get_or_insert(String::from("NoName")))
     }
-    pub async fn chord_names(&self) -> Vec<String> {
+
+    pub async fn veilid_own_dht(&self) -> MappedMutexGuard<'_, Option<DHTRecordDescriptor>> {
         let inner = self.inner.lock().await;
-        inner.chords.keys().cloned().collect()
-    }
-    pub async fn get_chord(&self, name: &String) -> Option<ChordState> {
-        let inner = self.inner.lock().await;
-
-        match inner.chords.get(name) {
-            Some((listen_addr, pub_addr, advert_addr, addrs)) => {
-                let listen_addr = listen_addr.to_string();
-                let pub_addr = pub_addr.to_string();
-                let advert_addr = advert_addr.to_string();
-                let mut state = ChordState::new(listen_addr, pub_addr, advert_addr);
-                state.add_addrs(addrs.clone());
-                Some(state)
-            }
-            None => None,
-        }
+        MutexGuard::map(inner, |i| &mut i.veilid_own_dht)
     }
 
-    pub async fn put_chord(&mut self, name: &String, chord: &ChordState) {
-        let mut inner = self.inner.lock().await;
-
-        let listen_addr = chord.listen_addr.clone();
-        let pub_addr = chord.pub_addr.clone();
-        let advert_addr = chord.advert_addr.clone();
-        let addrs = chord.get_addrs().map(|x| x.0.clone()).collect();
-        let state = (listen_addr, pub_addr, advert_addr, addrs);
-        inner.chords.insert(name.clone(), state);
-    }
-    pub async fn remove_chord(&mut self, name: &String) {
-        let mut inner = self.inner.lock().await;
-
-        inner.chords.remove(name);
-    }
-
-    pub async fn load_directory(&mut self) -> HashMap<Relation, DirectoryEntry> {
+    pub async fn load_directory(&self) -> HashMap<Relation, DirectoryEntry> {
         let inner = self.inner.lock().await;
         let mut ret = HashMap::new();
         for entry in &inner.directory {
@@ -125,7 +94,7 @@ impl StateData {
         }
         ret
     }
-    pub async fn save_directory(&mut self, directory: &HashMap<Relation, DirectoryEntry>) {
+    pub async fn save_directory(&self, directory: &HashMap<Relation, DirectoryEntry>) {
         let mut v = Vec::with_capacity(directory.len());
         for (_, entry) in directory {
             v.push(entry.clone());
@@ -148,7 +117,8 @@ struct StateDataInner {
     name: Option<String>,
     /// Map from chord names to listen_adder, pub_addr, and vectors of recent addresses
     #[serde(default)]
-    chords: HashMap<String, (String, String, String, Vec<String>)>,
+    veilid_own_dht: Option<DHTRecordDescriptor>,
+
     #[serde(default)]
     directory: Vec<DirectoryEntry>,
 }
@@ -163,7 +133,7 @@ impl StateDataInner {
 
             // Router Items
             name: None,
-            chords: HashMap::new(),
+            veilid_own_dht: None,
             directory: Vec::new(),
         }
     }

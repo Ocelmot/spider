@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use log::info;
+use tracing::info;
 use spider_link::{Relation, message::{DatasetData, RouterMessage, Message}};
 
 use super::RouterProcessorState;
@@ -15,7 +15,7 @@ impl RouterProcessorState{
         // send to externals
         for external in externals{
             if recipients.contains(&external){
-                continue; // this recipient already recieved message via subscription
+                continue; // this recipient already received message via subscription
             }
             info!("Sending message to external...");
             let router_msg = RouterMessage::Event(name.clone(), from.clone(), data.clone());
@@ -35,10 +35,10 @@ impl RouterProcessorState{
 // Helper functions
 impl RouterProcessorState{
     /// Forwards an event (a name and data) from some relation to active links
-    /// that have subscribed to events with that name.
-    /// Skips events from an external source and external subscriber to
-    /// avoid routing events that do not have to do with us.
-    /// Returns a set of relations to which the event was sent.
+    /// that have subscribed to events with that name. Skips events from an
+    /// external source and external subscriber to avoid routing events that do
+    /// not have to do with us. Returns a set of relations to which the event
+    /// was sent.
     async fn event_to_subscribers(&mut self, name: &String, from: &Relation, data: &DatasetData) -> HashSet<Relation>{
         let mut recipients = HashSet::new();
         if let Some(subscriber_set) = self.event_subscribers.get(name){

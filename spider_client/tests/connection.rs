@@ -1,48 +1,203 @@
-use spider_client::SpiderClientBuilder;
-use spider_link::{
-    message::{DatasetData, Message, RouterMessage},
-    Link, Role, SelfRelation,
+
+use spider_client::{
+    link::{
+        link::{LinkSet, TCPLink}, message::{DatasetData, Message, RouterMessage}, SelfRelation
+    }, ClientResponse, SpiderClientBuilder
 };
+use spider_link::{beacon::start_beacon_listen_handler, link::LinkSetMsg};
+use tracing::info;
+use tracing_test::traced_test;
+use serial_test::serial;
 
 #[tokio::test]
+#[traced_test]
+#[serial]
 async fn connect() {
-    let host_relation = SelfRelation::generate_key(Role::Peer);
-    let host_relation_relation = host_relation.relation.clone();
-    let (mut host, _) = Link::listen(host_relation, "127.0.0.1:1950");
+    let host_relation = SelfRelation::debug_get(0);
+    let client_relation = SelfRelation::debug_get(1);
 
-    let mut client_builder = SpiderClientBuilder::new();
+    let listen_addr = "127.0.0.1:1950";
+    info!("Starting listener");
+    let mut listener = TCPLink::listen(host_relation.clone(), listen_addr);
+
+    let mut client_builder = SpiderClientBuilder::new_with_self_relation(Some("".into()), client_relation.clone());
     client_builder.enable_beacon(false);
-    client_builder.enable_chord(false);
-    client_builder.enable_last_addr(false);
-    client_builder.set_fixed_addrs(vec![String::from("127.0.0.1:1950")]);
+    client_builder.disable_veilid();
+    client_builder.set_fixed_addrs(vec![String::from(listen_addr)]);
     client_builder.enable_fixed_addrs(true);
-    client_builder.set_host_relation(host_relation_relation.clone());
-    let client = client_builder.start(false);
+    client_builder.set_host_relation(host_relation.relation.clone());
+    info!("Starting client");
+    let client = client_builder.start(false).await.expect("Client should start");
 
+    let event_name = String::from("test");
+    let event_rel = host_relation.relation.clone();
+    let event_data = DatasetData::String(String::from("Test Data!"));
     let event = RouterMessage::Event(
-        String::from("test"),
-        host_relation_relation.clone(),
-        DatasetData::String(String::from("Test Data!")),
+        event_name.clone(),
+        event_rel.clone(),
+        event_data.clone(),
     );
-    client.send(Message::Router(event)).await;
+    info!("Sending message");
+    client.send(Message::Router(event)).await.expect("client should be started");
 
-    let mut host_link = host.recv().await.expect("Failed to get Link");
+    info!("Setting up listen link set");
+    let host_link = listener.recv().await.expect("listener failed to get Link");
+    let mut listen_link_set = LinkSet::new(host_relation.clone(), client_relation.relation);
+    listen_link_set.add_link(host_link).await.unwrap();
 
-    match host_link.recv().await {
-        Some(Message::Router(RouterMessage::Event(
-            kind,
-            relation,
-            DatasetData::String(string),
-        ))) => {
-            assert_eq!(kind, "test");
-            assert_eq!(relation, host_relation_relation);
-            assert_eq!(string, String::from("Test Data!"));
-        }
-        None => {
-            panic!("Did not recieve message!");
-        }
-        _ => {
-            panic!("Recieved incorrect data");
-        }
-    }
+    info!("Receiving connect message");
+    let msg = listen_link_set.recv().await.expect("listen link closed");
+    let LinkSetMsg::Connected(epoch) = msg else {panic!("Incorrect message")};
+    assert_eq!(epoch, 0);
+
+    info!("Receiving sent message");
+    let msg = listen_link_set.recv().await.expect("listen link closed");
+    let LinkSetMsg::Message(msg, epoch) = msg else {panic!("Incorrect message");};
+    assert_eq!(epoch, 0);
+    let Message::Router(msg) = msg else{panic!("Incorrect message type");};
+    let RouterMessage::Event(name, rel, _) = msg else{panic!("Incorrect message type");};
+    
+    assert_eq!(name, event_name);
+    assert_eq!(rel, event_rel);
+    // assert_eq!(data, event_data);
+}
+
+
+#[tokio::test]
+#[traced_test]
+#[serial]
+async fn beacon_connect() {
+    let host_relation = SelfRelation::debug_get(0);
+    let client_relation = SelfRelation::debug_get(1);
+
+    start_beacon_listen_handler(1960);
+
+    let listen_addr = "127.0.0.1:1960";
+    info!("Starting listener");
+    let mut listener = TCPLink::listen(host_relation.clone(), listen_addr);
+
+    let mut client_builder = SpiderClientBuilder::new_with_self_relation(Some("".into()), client_relation.clone());
+    client_builder.enable_beacon(true);
+    client_builder.disable_veilid();
+    client_builder.enable_fixed_addrs(false);
+    client_builder.set_host_relation(host_relation.relation.clone());
+    info!("Starting client");
+    let client = client_builder.start(false).await.expect("Client should start");
+
+    let event_name = String::from("test");
+    let event_rel = host_relation.relation.clone();
+    let event_data = DatasetData::String(String::from("Test Data!"));
+    let event = RouterMessage::Event(
+        event_name.clone(),
+        event_rel.clone(),
+        event_data.clone(),
+    );
+    info!("Sending message");
+    client.send(Message::Router(event)).await.expect("client should be started");
+
+    info!("Setting up listen link set");
+    let host_link = listener.recv().await.expect("listener failed to get Link");
+    let mut listen_link_set = LinkSet::new(host_relation.clone(), client_relation.relation);
+    listen_link_set.add_link(host_link).await.unwrap();
+
+    info!("Receiving connect message");
+    let msg = listen_link_set.recv().await.expect("listen link closed");
+    let LinkSetMsg::Connected(epoch) = msg else {panic!("Incorrect message")};
+    assert_eq!(epoch, 0);
+
+    info!("Receiving sent message");
+    let msg = listen_link_set.recv().await.expect("listen link closed");
+    let LinkSetMsg::Message(msg, epoch) = msg else {panic!("Incorrect message");};
+    assert_eq!(epoch, 0);
+    let Message::Router(msg) = msg else{panic!("Incorrect message type");};
+    let RouterMessage::Event(name, rel, _) = msg else{panic!("Incorrect message type");};
+    
+    assert_eq!(name, event_name);
+    assert_eq!(rel, event_rel);
+    // assert_eq!(data, event_data);
+}
+
+
+#[tokio::test]
+#[traced_test]
+#[serial]
+async fn client_round_trip() {
+    let host_relation = SelfRelation::debug_get(0);
+    let client_relation = SelfRelation::debug_get(1);
+
+    let listen_addr = "127.0.0.1:1970";
+    info!("Starting listener");
+    let mut listener = TCPLink::listen(host_relation.clone(), listen_addr);
+
+    let mut client_builder = SpiderClientBuilder::new_with_self_relation(Some("".into()), client_relation.clone());
+    client_builder.enable_beacon(false);
+    client_builder.disable_veilid();
+    client_builder.set_fixed_addrs(vec![String::from(listen_addr)]);
+    client_builder.enable_fixed_addrs(true);
+    client_builder.set_host_relation(host_relation.relation.clone());
+    info!("Starting client");
+    let mut client = client_builder.start(true).await.expect("Client should start");
+
+    let event_name = String::from("test");
+    let event_rel = host_relation.relation.clone();
+    let event_data = DatasetData::String(String::from("Test Data!"));
+    let event = RouterMessage::Event(
+        event_name.clone(),
+        event_rel.clone(),
+        event_data.clone(),
+    );
+    info!("Sending message to listener");
+    client.send(Message::Router(event)).await.expect("Client should be started");
+
+    info!("Setting up listen link set");
+    let host_link = listener.recv().await.expect("listener failed to get Link");
+    let mut listen_link_set = LinkSet::new(host_relation.clone(), client_relation.relation.clone());
+    listen_link_set.add_link(host_link).await.unwrap();
+
+    // From client to listener
+
+    info!("Listener receiving connect message");
+    let msg = listen_link_set.recv().await.expect("listen link closed");
+    let LinkSetMsg::Connected(epoch) = msg else {panic!("Incorrect message")};
+    assert_eq!(epoch, 0);
+
+    info!("Listener receiving sent message");
+    let msg = listen_link_set.recv().await.expect("listen link closed");
+    let LinkSetMsg::Message(msg, epoch) = msg else {panic!("Incorrect message");};
+    assert_eq!(epoch, 0);
+    let Message::Router(msg) = msg else{panic!("Incorrect message type");};
+    let RouterMessage::Event(name, rel, _) = msg else{panic!("Incorrect message type");};
+    
+    assert_eq!(name, event_name);
+    assert_eq!(rel, event_rel);
+    
+    // From listener to client
+    let event2_name = String::from("test2");
+    let event2_rel = client_relation.relation.clone();
+    let event2_data = DatasetData::String(String::from("Test Data!"));
+    let event2 = RouterMessage::Event(
+        event2_name.clone(),
+        event2_rel.clone(),
+        event2_data.clone(),
+    );
+    info!("Sending message to client");
+    listen_link_set.send(Message::Router(event2)).await.expect("Listener should be able to send");
+
+    info!("Client receiving connect message");
+    let msg = client.recv().await.expect("client link closed");
+    let ClientResponse::Connected(_conn_epoch) = msg else {panic!("Incorrect message")};
+
+    info!("Client receiving sent message");
+    let msg = client.recv().await.expect("client link closed");
+    let ClientResponse::Message(msg, _) = msg else {panic!("Incorrect message");};
+
+    let Message::Router(msg) = msg else{panic!("Incorrect message type");};
+    let RouterMessage::Event(name, rel, _) = msg else{panic!("Incorrect message type");};
+    
+    assert_eq!(name, event2_name);
+    assert_eq!(rel, event2_rel);
+
+
+
+
 }

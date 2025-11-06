@@ -1,8 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
-use log::debug;
 use serde::{Deserialize, Serialize};
-use tracing::field::debug;
+use tracing::debug;
 use veilid_core::TypedKey;
 
 use crate::{Relation, SelfRelation};
@@ -29,7 +28,7 @@ impl VeilidFrame {
         let  ret = Self {
             rel: us.relation.clone(),
             data,
-            sig,
+            sig: sig.to_vec(),
             index: 0,
             count: 1,
         };
@@ -204,7 +203,7 @@ impl FrameManager {
 /// These messages are not sent through the usual Link system
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum VeilidMessage {
-    /// Used to finish establishing a connection that was started by recieving
+    /// Used to finish establishing a connection that was started by receiving
     /// an invite message.
     CompleteInvite {
         /// The key of the DHT entry location

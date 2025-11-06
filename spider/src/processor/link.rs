@@ -3,7 +3,10 @@ use tokio::sync::mpsc::{error::SendError, Sender};
 
 use crate::{config::SpiderConfig, state_data::StateData};
 
-use super::{message::ProcessorMessage, router::RouterProcessorMessage, ui::UiProcessorMessage, dataset::DatasetProcessorMessage};
+use super::{
+    dataset::DatasetProcessorMessage, message::ProcessorMessage, router::RouterProcessorMessage,
+    ui::UiProcessorMessage,
+};
 
 #[derive(Debug, Clone)]
 pub struct ProcessorLink {
@@ -13,7 +16,11 @@ pub struct ProcessorLink {
 }
 
 impl ProcessorLink {
-    pub(crate) fn new( config: SpiderConfig, state: StateData, sender: Sender<ProcessorMessage>) -> Self {
+    pub(crate) fn new(
+        config: SpiderConfig,
+        state: StateData,
+        sender: Sender<ProcessorMessage>,
+    ) -> Self {
         Self {
             config,
             state,
@@ -21,7 +28,7 @@ impl ProcessorLink {
         }
     }
 
-    pub fn config(&self) -> &SpiderConfig{
+    pub fn config(&self) -> &SpiderConfig {
         &self.config
     }
 
@@ -29,13 +36,16 @@ impl ProcessorLink {
         &self.state
     }
 
-    pub(crate) async fn send(&self, msg: ProcessorMessage) -> Result<(), SendError<ProcessorMessage>> {
+    pub(crate) async fn send(
+        &self,
+        msg: ProcessorMessage,
+    ) -> Result<(), SendError<ProcessorMessage>> {
         self.sender.send(msg).await
     }
 
     // send message
     pub(crate) async fn send_message(
-        &mut self,
+        &self,
         rel: Relation,
         msg: Message,
     ) -> Result<(), SendError<ProcessorMessage>> {
@@ -46,7 +56,7 @@ impl ProcessorLink {
 
     /// Send a [Message] to each of the [Relation]s
     pub(crate) async fn multicast_message(
-        &mut self,
+        &self,
         rels: Vec<Relation>,
         msg: Message,
     ) -> Result<(), SendError<ProcessorMessage>> {
@@ -57,7 +67,7 @@ impl ProcessorLink {
 
     // somecast message
     pub(crate) async fn somecast_message(
-        &mut self,
+        &self,
         rels: Vec<Relation>,
         limit: usize,
         msg: Message,
@@ -69,7 +79,7 @@ impl ProcessorLink {
 
     // send ui
     pub(crate) async fn send_ui(
-        &mut self,
+        &self,
         msg: UiProcessorMessage,
     ) -> Result<(), SendError<ProcessorMessage>> {
         let msg = ProcessorMessage::UiMessage(msg);
@@ -78,11 +88,10 @@ impl ProcessorLink {
 
     // send dataset
     pub(crate) async fn send_dataset(
-        &mut self,
+        &self,
         msg: DatasetProcessorMessage,
     ) -> Result<(), SendError<ProcessorMessage>> {
         let msg = ProcessorMessage::DatasetMessage(msg);
         self.sender.send(msg).await
     }
-
 }

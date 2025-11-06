@@ -9,7 +9,7 @@ use crate::{config::SpiderConfig, state_data::StateData};
 use super::{link::ProcessorLink, ui::UiProcessorMessage};
 
 mod message;
-use log::info;
+use tracing::info;
 pub use message::DatasetProcessorMessage;
 
 use spider_link::{

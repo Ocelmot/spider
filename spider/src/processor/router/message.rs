@@ -1,36 +1,36 @@
 use spider_link::{
-    message::{Invite, Message, RouterMessage},
-    Link, Relation, SpiderId2048,
+    link::LinkSet,
+    message::{Message, RouterMessage},
+    Relation,
 };
 
 #[derive(Debug)]
 pub enum RouterProcessorMessage {
     PeripheralMessage(Relation, RouterMessage),
-    
-    NewLink(Link),
-    SetApprovalCode(String),
-    ApproveLink(String),
-    DenyLink(String),
-    ApprovedLink(Link),
+
+    AddApprovalCode(String),
+    ApproveConnection(Relation),
+    DenyConnection(Relation),
+    ApprovedConnection(Vec<(Message, u64)>, LinkSet),
+
+    Connected(Relation, u64),
+    UnapprovedMessage(Relation, Message),
+    Disconnected(Relation),
 
     SendMessage(Relation, Message),
     MulticastMessage(Vec<Relation>, Message),
     SomecastMessage(Vec<Relation>, usize, Message),
 
-    JoinChord(String),
-    HostChord(String),
-    LeaveChord(String),
-
-    AddrUpdate(SpiderId2048, String),
-
+    /// Sets the name the base presents to other members of the network
     SetName(String),
+    /// Sets a nickname for another member of the network
     SetNickname(Relation, String),
+
     /// Set the directory entry for the [Relation] with the key [String] to the value [String]
-    SetDirectoryEntry(Relation, String, String), 
+    SetDirectoryEntry(Relation, String, String),
+
     ClearDirectoryEntry(Relation),
 
-    /// Accepts an invite recieved from the user.
-    AcceptInvite(Invite),
     /// Revokes an invite, based on a string id that refers to that invite.
     RevokeInvite(String),
 

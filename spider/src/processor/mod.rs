@@ -1,7 +1,8 @@
 use std::io::Error;
 use std::{path::Path, time::Duration};
 
-use log::info;
+use spider_link::beacon::start_beacon_listen_handler;
+use tracing::info;
 use spider_link::message::Message;
 use spider_link::Keyfile;
 use tokio::fs;
@@ -11,16 +12,13 @@ use tokio::{
     time::interval,
 };
 
+use crate::error::{SpiderError, SpiderResult};
 use crate::{config::SpiderConfig, state_data::StateData};
 
 mod link;
 use link::ProcessorLink;
 
-mod listener;
-use listener::ListenerProcessor;
-
 mod router;
-pub use router::ChordState;
 use router::RouterProcessor;
 
 mod message;
@@ -40,7 +38,6 @@ use group::GroupProcessor;
 
 use self::dataset::DatasetProcessorMessage;
 use self::group::GroupProcessorMessage;
-use self::listener::ListenProcessorMessage;
 use self::peripherals::PeripheralProcessorMessage;
 use self::router::RouterProcessorMessage;
 
@@ -88,17 +85,17 @@ impl ProcessorBuilder {
         }
     }
 
-    pub async fn start_processor(self) -> Option<ProcessorHandle> {
+    pub async fn start_processor(self) -> SpiderResult<ProcessorHandle> {
         let config = match self.config {
             Some(config) => config,
-            None => return None,
+            None => return Err(SpiderError::new().msg("Failed to read config")),
         };
         let state = match self.state {
             Some(state) => state,
-            None => return None,
+            None => return Err(SpiderError::new().msg("Failed to read state")),
         };
-        let processor = Processor::new(config, state).await;
-        Some(processor.start())
+        let processor = Processor::new(config, state).await?;
+        Ok(processor.start())
     }
 }
 
@@ -108,7 +105,6 @@ struct Processor {
     sender: ProcessorLink,
     receiver: Receiver<ProcessorMessage>,
 
-    listener: ListenerProcessor,
     router: RouterProcessor,
     peripherals: PeripheralsProcessor,
     ui: UiProcessor,
@@ -121,32 +117,37 @@ struct Processor {
 }
 
 impl Processor {
-    async fn new(config: SpiderConfig, state: StateData) -> Self {
+    async fn new(config: SpiderConfig, state: StateData) -> SpiderResult<Self> {
         // create channel
         let (sender, receiver) = channel(500);
-        let sender = ProcessorLink::new(config.clone(), state.clone(), sender);
-
-        // start listener
-        let listener = ListenerProcessor::new(config.clone(), state.clone(), sender.clone());
+        let pl = ProcessorLink::new(config.clone(), state.clone(), sender);
 
         // start router
-        let router = RouterProcessor::new(config.clone(), state.clone(), sender.clone()).await;
+        let router = RouterProcessor::new(pl.clone()).await?;
+
+        // start beacon
+        if config.beacon_enabled() {
+            info!("Starting beacon listener.");
+            start_beacon_listen_handler(1930);
+        }else{
+            info!("Beacon listener disabled.");
+        }
 
         // start peripherals
-        let peripherals = PeripheralsProcessor::new(config.clone(), state.clone(), sender.clone());
+        let peripherals = PeripheralsProcessor::new(config.clone(), state.clone(), pl.clone());
 
         // start ui
-        let ui = UiProcessor::new(config.clone(), state.clone(), sender.clone());
+        let ui = UiProcessor::new(config.clone(), state.clone(), pl.clone());
 
         // start datasets
         let dataset_processor =
-            DatasetProcessor::new(config.clone(), state.clone(), sender.clone());
+            DatasetProcessor::new(config.clone(), state.clone(), pl.clone());
 
         // start groups
-        let group_processor = GroupProcessor::new(config.clone(), state.clone(), sender.clone());
+        let group_processor = GroupProcessor::new(config.clone(), state.clone(), pl.clone());
 
         // start upkeep interval
-        let update_channel = sender.clone();
+        let update_channel = pl.clone();
         // let update_state = state.clone();
         let upkeep_interval_handle = tokio::spawn(async move {
             let mut interval = interval(Duration::from_secs(15));
@@ -156,13 +157,12 @@ impl Processor {
             }
         });
 
-        Self {
+        Ok(Self {
             state,
             config,
-            sender,
+            sender: pl,
             receiver,
 
-            listener,
             router,
             peripherals,
             ui,
@@ -172,7 +172,7 @@ impl Processor {
             print_msg: false,
 
             upkeep_interval_handle,
-        }
+        })
     }
 
     fn start(mut self) -> ProcessorHandle {
@@ -274,9 +274,6 @@ impl Processor {
                         }
                         Message::Error(_) => {}
                     },
-                    ProcessorMessage::ListenerMessage(msg) => {
-                        self.listener.send(msg).await;
-                    }
                     ProcessorMessage::RouterMessage(msg) => {
                         self.router.send(msg).await;
                     }
@@ -292,7 +289,6 @@ impl Processor {
                     }
 
                     ProcessorMessage::Upkeep => {
-                        self.listener.send(ListenProcessorMessage::Upkeep).await;
                         self.ui.send(UiProcessorMessage::Upkeep).await;
                         self.dataset_processor
                             .send(DatasetProcessorMessage::Upkeep)

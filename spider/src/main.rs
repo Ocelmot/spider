@@ -23,16 +23,16 @@
 //! peripheral that is automatically paired to the base.
 //! - An Application peripheral executes on a device that also executes other
 //! user software. E.g. personal computers or mobile devices. These peripherals
-//! may use the base's UI or provide thier own.
+//! may use the base's UI or provide their own.
 //! - A UI Peripheral is an application peripheral that specializes in
 //! displaying UI pages on behalf of the base. This could be either on a
 //! personal computer or a mobile device.
 //! - A Standalone peripheral executes on its own device. E.g IOT type devices.
-//! As these devices are typicall headless or have limited UI capabilities,
+//! As these devices are typical headless or have limited UI capabilities,
 //! they can register a UI page with the base to be displayed through the
 //! base's interface.
-//! - A Satelite peripheral is a standalone peripheral that does not register
-//! a UI page or recieve messages. It only sends messages to the base. E.g.
+//! - A Satellite peripheral is a standalone peripheral that does not register
+//! a UI page or receive messages. It only sends messages to the base. E.g.
 //! some type of low power probe or sensor.
 
 /// included libraries
@@ -44,7 +44,7 @@ use std::{
 };
 
 use simple_logger::SimpleLogger;
-use tracing::{debug, error, info, Level};
+use tracing::{debug, error, info, level_filters::LevelFilter, trace, Level};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{
     filter::filter_fn, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt,
@@ -59,6 +59,8 @@ use state_data::StateData;
 
 mod processor;
 use crate::processor::ProcessorBuilder;
+
+mod error;
 
 /// Command line arguments: <filename>
 /// filename is name of config file, defaults to config.json
@@ -75,12 +77,13 @@ async fn main() -> Result<(), io::Error> {
 
     // Setup tracing
     let filter = filter_fn(|metadata| {
-        // metadata.target() == "spider"
-
-        // if metadata.level() > &Level::DEBUG {
-        //     return false;
+        if metadata.target().contains("spider") {
+            return true;
+        }
+        // if metadata.target().contains("veilid") && metadata.level() <= &Level::INFO {
+        //     return true
         // }
-        true
+        false
     });
 
     // let log_path = config.log_path.clone();
@@ -89,10 +92,15 @@ async fn main() -> Result<(), io::Error> {
     let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::stdout());
     let subscriber = tracing_subscriber::fmt()
         .compact()
-        .with_ansi(false)
+        // .with_ansi(false)
         .with_writer(non_blocking)
+        .with_max_level(LevelFilter::TRACE)
         .finish();
     subscriber.with(filter).init();
+
+    trace!("trace");
+    debug!("debug");
+
 
     info!("Starting!");
     info!("Loaded config: {:?}", config);
@@ -123,6 +131,7 @@ fn load_config() -> SpiderConfig {
     let mut args = env::args().skip(1);
     let path_str = args.next().unwrap_or("spider_config.json".to_string());
     let config_path = Path::new(&path_str);
+    println!("Loading config file from {:?}", config_path.canonicalize());
     let config = SpiderConfig::from_file(&config_path);
     config
 }

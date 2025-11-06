@@ -16,9 +16,9 @@
 //!
 //! # Usage
 //! The client must first be configured and connected to the base in order to be able to processes messages.
-//! Once the peripheral is connected, messages can then be sent and recieved.
+//! Once the peripheral is connected, messages can then be sent and received.
 //! The following two sections show various examples to configure and connect
-//! to the base, and send and recieve messages respectively.
+//! to the base, and send and receive messages respectively.
 //!
 //! ## Configuration and connection examples
 //! This example shows how a service peripheral connects to the base.
@@ -29,6 +29,9 @@
 //! 'spider_keyfile.json' in the directory in which it was run.
 //!
 //! ```
+//! use std::path::PathBuf;
+//! use spider_client::SpiderClientBuilder;
+//!
 //! #[tokio::main]
 //! async fn main() {
 //!     // Path to saved client state
@@ -41,17 +44,20 @@
 //!     let mut builder = SpiderClientBuilder::load_or_set(&client_path, |builder| {
 //!         // Enable the client to search for the base using addresses from a set list.
 //!         builder.enable_fixed_addrs(true);
+//! #       builder.enable_veilid(false);
 //!         // Define the list of addrs to search for the base.
 //!         builder.set_fixed_addrs(vec!["localhost:1930".into()]);
-//!     });
+//!     }).expect("builder should be able to save file");
 //!
 //!     // Load the base's key from a keyfile if it exists.
 //!     builder.try_use_keyfile("spider_keyfile.json").await;
 //!
 //!     // The channel is then started, and can be used to send and recv messages with the base.
-//!     let client_channel = builder.start(true);
-//!
-//!     info!("Connected");
+//!     if let Ok(client_channel) = builder.start(true).await {
+//!         println!("Connected");
+//!     } else {
+//!         println!("Errored");
+//!     }
 //! }
 //! ```
 //!
@@ -66,13 +72,19 @@
 //! ```
 //!
 
-pub use spider_link::{
-    beacon::{beacon_lookout_many, beacon_lookout_one},
-    message, Link, Relation, Role, SelfRelation, SpiderId2048,
-};
-
-mod client;
-pub use client::{set_veilid_path_root, ClientChannel, ClientResponse, SpiderClientBuilder};
+/// Re export of the spider_link crate
+pub mod link {
+    pub use spider_link::*;
+}
 
 mod state;
-use state::SpiderClientState;
+
+mod builder;
+pub use builder::SpiderClientBuilder;
+mod client_message;
+mod error;
+pub use client_message::ClientResponse;
+mod channel;
+pub use channel::ClientChannel;
+mod processor;
+// mod veilid_hub_registry;

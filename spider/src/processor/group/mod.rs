@@ -2,7 +2,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use log::{error, info};
+use tracing::{error, info};
 use num_bigint::BigUint;
 use spider_link::message::{GroupEvent, GroupId, GroupMessage, Message};
 use spider_link::Relation;

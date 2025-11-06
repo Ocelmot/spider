@@ -6,7 +6,7 @@ use crate::{config::SpiderConfig, state_data::StateData};
 use super::{link::ProcessorLink, ui::UiProcessorMessage, message::ProcessorMessage};
 
 mod message;
-use log::info;
+use tracing::info;
 pub use message::PeripheralProcessorMessage;
 
 mod manifest;

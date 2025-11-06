@@ -5,6 +5,7 @@ use tokio::{net::UdpSocket, task::JoinHandle};
 
 use crate::config::SpiderConfig;
 
+#[deprecated]
 pub(crate) fn start_beacon(config: &SpiderConfig) -> JoinHandle<()> {
     let listen_addr = config.listen_addr.clone();
     let port = match SocketAddr::from_str(&listen_addr) {

@@ -1,122 +1,156 @@
-use std::{fs, path::Path, net::SocketAddr};
+use std::{num::NonZeroUsize, path::Path};
 
-use serde::{Serialize, Deserialize};
-use spider_link::{SelfRelation, Relation, Role};
-use veilid_core::{CryptoKey, CryptoTyped};
+use tokio::fs;
+use lru::LruCache;
+use serde::{ser::SerializeTuple, Deserialize, Deserializer, Serialize, Serializer};
+use spider_link::{Relation, Role, SelfRelation};
 
-
+use crate::error::{ClientResult, ErrorKind, ProblemWrap};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SpiderClientState{
+pub(crate) struct SpiderClientState {
     // Identity
     pub self_relation: SelfRelation,
+
+    #[serde(default)]
     pub host_relation: Option<Relation>,
+
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub permission_code: Option<String>,
 
     // Config
+    #[serde(default = "bool_true")]
     pub auto_reconnect: bool,
-    pub connection_attempts: u8,
 
-    // Address finding strategies
-    // Last known address
-    pub last_addr_enable: bool,
-    pub last_addr_global: Option<String>,
-    pub last_addr_local: Option<String>,
+    // Connection methods
+    // Addresses from the Base
+    #[serde(default = "bool_true")]
+    pub base_addrs_enable: bool,
 
-    // Beacon 
+    #[serde(
+        skip_serializing_if = "LruCache::is_empty",
+        default = "default_lru",
+        serialize_with = "serialize_lru",
+        deserialize_with = "deserialize_lru"
+    )]
+    pub base_addrs: LruCache<String, ()>,
+
+    // Beacon
+    #[serde(default = "bool_true")]
     pub beacon_enable: bool,
 
     // Veilid
-    pub veilid_enable: bool,
     #[serde(default)]
-    pub own_dht: Option<CryptoTyped<CryptoKey>>,
-    #[serde(default)]
-    pub paired_dht: Option<CryptoTyped<CryptoKey>>,
+    pub veilid_enable: Option<String>,
 
-    // Chord
-    pub chord_enable: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub chord_addrs: Vec<String>,
+    #[serde(default)]
+    pub veilid_root: Option<String>,
+
+    #[serde(default)]
+    pub veilid_own_dht: Option<()>,
 
     // Fixed Addresses
+    #[serde(default)]
     pub fixed_addr_enable: bool,
+
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub fixed_addrs: Vec<String>,
 }
 
-
 impl SpiderClientState {
-
-    pub fn new() -> Self {
-        Self{
+    pub fn new(self_rel: SelfRelation) -> Self {
+        Self {
             // Identity
-            self_relation: SelfRelation::generate_key(Role::Peripheral),
+            self_relation: self_rel,
             host_relation: None,
             permission_code: None,
 
             // Config
-            auto_reconnect: false,
-            connection_attempts: 0,
+            auto_reconnect: true,
 
-            // Address finding strategies
-            // Last known address
-            last_addr_enable: true,
-            last_addr_global: None,
-            last_addr_local: None,
+            // Last Addresses
+            base_addrs_enable: true,
+            base_addrs: default_lru(),
 
-            // Beacon 
+            // Beacon
             beacon_enable: true,
 
             // Veilid
-            veilid_enable: true,
-            own_dht:None,
-            paired_dht: None,
-
-            // Chord
-            chord_enable: true,
-            chord_addrs: Vec::new(),
+            veilid_enable: None,
+            veilid_own_dht: None,
+            veilid_root: None,
 
             // Fixed Addresses
-            fixed_addr_enable: false,
+            fixed_addr_enable: true,
             fixed_addrs: Vec::new(),
         }
     }
 
-    pub fn from_string(s: String) -> Option<Self> {
-        serde_json::from_str(&s).ok()
+    pub fn from_string(s: String) -> ClientResult<Self> {
+        serde_json::from_str(&s).wrap_problem(ErrorKind::Deserialize)
     }
 
-    pub fn from_file(path: &Path) -> Self {
-        let data = fs::read_to_string(&path).expect(&format!("Failed to read spider config from file: {:?}", path));
-		let config = serde_json::from_str(&data).expect("Failed to deserialize chord state");
-        config
+    pub async fn from_file<P>(path: P) -> ClientResult<Self>
+    where
+        P: AsRef<Path> + std::fmt::Debug,
+    {
+        let data = fs::read_to_string(&path).await.wrap_problem_msg(
+            ErrorKind::IO,
+            &format!("Failed to read spider config from file: {:?}", path),
+        )?;
+
+        serde_json::from_str(&data).wrap_problem(ErrorKind::Deserialize)
     }
 
-    pub fn to_file(&self, path: &Path){
-        let data = serde_json::to_string(self).expect("Failed to serialize chord state");
-        fs::write(&path, data).expect(&format!("Failed to write spider config to file: {:?}", path));
+    pub async fn to_file(&self, path: &Path) -> ClientResult {
+        let data = serde_json::to_string(self).expect("Failed to serialize client state");
+        tokio::fs::write(&path, data).await.wrap_problem_msg(
+            ErrorKind::IO,
+            &format!("Failed to write spider config to file: {:?}", path),
+        )
+    }
+}
+
+impl Default for SpiderClientState {
+    fn default() -> Self {
+        Self::new(SelfRelation::generate_key(Role::Peripheral))
+    }
+}
+
+fn bool_true() -> bool {
+    true
+}
+
+fn default_lru() -> LruCache<String, ()> {
+    LruCache::new(NonZeroUsize::new(10).unwrap())
+}
+
+fn deserialize_lru<'de, D>(deserializer: D) -> Result<LruCache<String, ()>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let data: (usize, Vec<String>) = Deserialize::deserialize(deserializer)?;
+
+    let cap = NonZeroUsize::new(data.0).ok_or(serde::de::Error::invalid_value(
+        serde::de::Unexpected::Unsigned(data.0 as u64),
+        &"lru must have a non-zero length",
+    ))?;
+
+    let mut lru = LruCache::new(cap);
+    for item in data.1.into_iter().rev() {
+        lru.push(item, ());
     }
 
-    pub fn set_last_addr(&mut self, set: Option<String>){
-        match set {
-            Some(addr_str) => {
-                match addr_str.parse::<SocketAddr>(){
-                    Ok(addr) => {
-                        if ip_rfc::global(&addr.ip()){
-                            self.last_addr_global = Some(addr_str);
-                        }else{
-                            self.last_addr_local = Some(addr_str);
-                        }
-                    },
-                    Err(_) => return,
-                }
-            },
-            None => {
-                self.last_addr_global = None;
-                self.last_addr_local = None;
-            },
-        }
-    }
+    Ok(lru)
+}
 
+fn serialize_lru<S>(lru: &LruCache<String, ()>, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer{
+    let mut tup = serializer.serialize_tuple(2)?;
+    tup.serialize_element(&lru.len())?;
+    let mut vec = Vec::with_capacity(lru.len());
+    for (item, _) in lru {
+        vec.push(item);
+    }
+    tup.serialize_element(&vec)?;
+    tup.end()
 }

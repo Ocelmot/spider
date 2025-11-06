@@ -2,23 +2,33 @@
 //! local network by broadcasting a probe. The response allows the
 //! peripheral to find the address of the base.
 
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    collections::HashMap,
+    net::{IpAddr, SocketAddr},
+    pin::Pin,
+    sync::Arc,
+    time::Duration,
+};
 
 use futures::{
     stream::{self, SelectAll},
     Stream, StreamExt,
 };
 
-use log::info;
 use network_interface::NetworkInterfaceConfig;
 use tokio::{
     net::UdpSocket,
-    time::{timeout, Instant},
+    select,
+    task::JoinHandle,
+    time::{interval, timeout, Instant, Interval},
 };
+use tokio_stream::StreamMap;
+use tracing::{error, info, trace, warn};
 
 /// Broadcast a request over the local network for any base that is
 /// listening. The IP address of the first response received is returned.
 /// This function will timeout after 10 seconds.
+#[deprecated = "Use Beacon struct instead"]
 pub async fn beacon_lookout_one(limit: Duration) -> Option<String> {
     let sockets = get_interface_sockets().await;
     beacon_probe_send(&sockets).await;
@@ -40,6 +50,7 @@ pub async fn beacon_lookout_one(limit: Duration) -> Option<String> {
 /// listening. Returns a Vec of the IP addresses of the responses
 /// received during the time limit.
 /// This function will timeout after the given Duration.
+#[deprecated = "Use Beacon struct instead"]
 pub async fn beacon_lookout_many(limit: Duration) -> Vec<String> {
     let sockets = get_interface_sockets().await;
     beacon_probe_send(&sockets).await;
@@ -72,21 +83,40 @@ async fn get_interface_sockets() -> Vec<UdpSocket> {
         .flat_map(|interface| interface.addr.iter());
 
     for addr in addrs {
+        trace!("Beacon binding on {:?}", addr.ip());
         match addr {
             network_interface::Addr::V4(addr) => {
                 if addr.ip.is_private() || addr.ip.is_loopback() {
-                    let socket = UdpSocket::bind((addr.ip, 1929)).await.unwrap();
-                    socket.set_broadcast(true);
+                    match UdpSocket::bind((addr.ip, 1929)).await {
+                        Ok(socket) => {
+                            if let Err(e) = socket.set_broadcast(true) {
+                                warn!("Cant broadcast on {}, due to error {}", addr.ip, e);
+                                continue;
+                            }
 
-                    sockets.push(socket);
+                            sockets.push(socket);
+                        }
+                        Err(e) => {
+                            warn!("Cant bind to {}, due to error {}", addr.ip, e);
+                        }
+                    }
                 }
             }
             network_interface::Addr::V6(addr) => {
                 if addr.ip.is_loopback() {
-                    let socket = UdpSocket::bind((addr.ip, 1929)).await.unwrap();
-                    socket.set_broadcast(true);
+                    match UdpSocket::bind((addr.ip, 1929)).await {
+                        Ok(socket) => {
+                            if let Err(e) = socket.set_broadcast(true) {
+                                warn!("Cant broadcast on {}, due to error {}", addr.ip, e);
+                                continue;
+                            }
 
-                    sockets.push(socket);
+                            sockets.push(socket);
+                        }
+                        Err(e) => {
+                            warn!("Cant bind to {}, due to error {}", addr.ip, e);
+                        }
+                    }
                 }
             }
         }
@@ -99,14 +129,14 @@ async fn beacon_probe_send(sockets: &Vec<UdpSocket>) {
     for socket in sockets {
         match socket.local_addr() {
             Ok(addr) => {
-                info!("Probing for spiders on {} ...", addr);
-            },
+                trace!("Probing for spiders on {} ...", addr);
+            }
             Err(_) => {
-                info!("Probing for spiders on Unknown ...", );
-            },
+                trace!("Probing for spiders on Unknown ...",);
+            }
         }
-        
-        socket
+
+        let _ = socket
             .send_to(b"SPIDER_PROBE", "255.255.255.255:1930")
             .await;
     }
@@ -124,15 +154,132 @@ fn sockets_to_recv_stream(sockets: Vec<UdpSocket>) -> SelectAll<impl Stream<Item
     ret
 }
 
+/// Beacon broadcasts a request for nearby bases to reply. This yields those
+/// replies in an asynchronous way.
+pub struct Beacon {
+    listeners: StreamMap<IpAddr, Pin<Box<dyn Stream<Item = SocketAddr> + Send + Sync>>>,
+    senders: HashMap<IpAddr, Arc<UdpSocket>>,
+    interval: Interval,
+}
+
+impl Beacon {
+    /// Create a new beacon to query for nearby bases
+    pub fn new(period: Duration) -> Self {
+        trace!("Launching beacon");
+        let mut interval = interval(period);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        Self {
+            listeners: StreamMap::new(),
+            senders: HashMap::new(),
+            interval,
+        }
+    }
+
+    /// Clears the sockets from the internal structures, allowing other systems
+    /// to bind to them.
+    pub fn clear_sockets(&mut self) {
+        self.listeners.clear();
+        self.senders.clear();
+    }
+
+    async fn fill_sockets(&mut self) {
+        let interfaces = network_interface::NetworkInterface::show().unwrap_or(Vec::new());
+
+        let addrs = interfaces
+            .iter()
+            .flat_map(|interface| interface.addr.iter());
+
+        for addr in addrs {
+            // skip if we already have a socket
+            if self.listeners.contains_key(&addr.ip()) {
+                trace!("Addr {} already in beacon set", addr.ip());
+                continue;
+            }
+            // skip if not a private or loopback address
+            match addr {
+                network_interface::Addr::V4(v4_if_addr) => {
+                    if !v4_if_addr.ip.is_private() && !v4_if_addr.ip.is_loopback() {
+                        continue;
+                    }
+                }
+                network_interface::Addr::V6(v6_if_addr) => {
+                    if !v6_if_addr.ip.is_loopback() {
+                        continue;
+                    }
+                }
+            }
+
+            trace!("Beacon binding on {:?}", addr.ip());
+            let socket = match UdpSocket::bind((addr.ip(), 1929)).await {
+                Ok(socket) => Arc::new(socket),
+                Err(e) => {
+                    warn!("Cant bind to {}, due to error {}", addr.ip(), e);
+                    continue;
+                }
+            };
+            if let Err(e) = socket.set_broadcast(true) {
+                warn!("Cant broadcast on {}, due to error {}", addr.ip(), e);
+                continue;
+            }
+
+            self.senders.insert(addr.ip(), socket.clone());
+            self.listeners.insert(
+                addr.ip(),
+                Box::pin(stream::unfold(socket, |socket| async {
+                    beacon_response_recv(&socket)
+                        .await
+                        .map(|addr| (addr, socket))
+                })),
+            );
+        }
+    }
+
+    /// Return the next address received from the beacon
+    pub async fn next_addr(&mut self) -> SocketAddr {
+        loop {
+            trace!("listeners count: {}", self.listeners.len());
+            select! {
+                Some((_, sock_addr)) = self.listeners.next(), if !self.listeners.is_empty() => {
+                    return sock_addr;
+                }
+                _ = self.interval.tick() => {
+                    trace!("Beacon ticked");
+                    self.fill_sockets().await;
+                    trace!("senders count: {}", self.senders.len());
+                    for (_, socket) in &self.senders {
+                        match socket.local_addr() {
+                            Ok(addr) => {
+                                trace!("Probing for spiders on {} ...", addr);
+                            }
+                            Err(_) => {
+                                trace!("Probing for spiders on Unknown ...",);
+                            }
+                        }
+
+                        let _ = socket
+                            .send_to(b"SPIDER_PROBE", "255.255.255.255:1930")
+                            .await;
+                    }
+                }
+            }
+        }
+    }
+}
+
 async fn beacon_response_recv(socket: &UdpSocket) -> Option<SocketAddr> {
     let mut buf = [0; 1024];
     loop {
-        let (size, from) = socket.recv_from(&mut buf).await.ok()?;
+        let recv_res = socket.recv_from(&mut buf).await;
+        if let Err(e) = &recv_res {
+            error!("beacon send error: {}", e);
+        }
 
-        info!("probe received: {} bytes from {}", size, from);
+        let (size, from) = recv_res.ok()?;
+
+        trace!("probe received: {} bytes from {}", size, from);
         let msg = &mut buf[..size];
         let msg_txt = String::from_utf8_lossy(&msg);
-        info!("probe received: {}", msg_txt);
+        trace!("probe received: {}", msg_txt);
 
         let parts = msg_txt.split(':').collect::<Vec<_>>();
         if parts.len() < 2 {
@@ -149,4 +296,41 @@ async fn beacon_response_recv(socket: &UdpSocket) -> Option<SocketAddr> {
             break Some(to);
         }
     }
+}
+
+/// Starts the beacon handler that will respond with the given port number. The
+/// typical value for the Spider application is 1930.
+///
+/// The address portion of the beacon is pulled from the udp response. The
+/// return value is the JoinHandle for the loop, which can be used to cancel the
+/// beacon handler.
+pub fn start_beacon_listen_handler(advert_port: u16) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut buf = [0; 1024];
+
+        let socket = UdpSocket::bind("0.0.0.0:1930").await.unwrap();
+        loop {
+            trace!("probe looping");
+            let (size, from) = socket.recv_from(&mut buf).await.unwrap();
+
+            info!("probe received: {} bytes from {}", size, from);
+            let msg = &mut buf[..size];
+            let msg_txt = String::from_utf8_lossy(&msg);
+            info!("probe received: {}", msg_txt);
+
+            if msg == b"SPIDER_PROBE" {
+                let addr = from;
+                info! {"sending reply to {}", addr};
+                // it isn't always clear what the address of this device is
+                // if it is listening on 0.0.0.0.
+                // let the other side get the address from the reply, but send
+                // the port number to connect to.
+                let reply = format!("SPIDER_REPLY:{}", advert_port);
+                socket
+                    .send_to(&reply.as_bytes().to_vec(), addr)
+                    .await
+                    .unwrap();
+            }
+        }
+    })
 }

@@ -47,9 +47,7 @@ mod router;
 pub use router::{
     RouterMessage,
     DirectoryEntry,
-    InviteType,
     Invite,
-    VeilidInvite,
 };
 
 mod group;
@@ -68,12 +66,12 @@ pub use group::{
     ProposalDatasetChange,
 };
 
-mod veilid;
-pub use veilid::{
-    VeilidFrame,
-    FrameManager,
-    VeilidMessage,
-};
+// mod veilid;
+// pub use veilid::{
+//     VeilidFrame,
+//     FrameManager,
+//     VeilidMessage,
+// };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Frame {
@@ -109,7 +107,7 @@ pub enum Message {
     Dataset(DatasetMessage),
 
     /// The message is a [RouterMessage].
-    /// Used to route arbitrairy data to members of the network
+    /// Used to route arbitrary data to members of the network
     Router(RouterMessage),
 
     /// The message is a [GroupMessage].
