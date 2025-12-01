@@ -151,7 +151,7 @@ impl UiProcessorState {
                     self.sender.send_dataset(msg).await;
                 }
             }
-            UiMessage::Pages(_) => {} // ignore, (base sends this, doesnt process it)
+            UiMessage::Pages(_) => {} // ignore, (base sends this, doesn't process it)
             UiMessage::GetPage(id) => match self.pages.get_page_mut(&id) {
                 Some(page) => {
                     let msg = Message::Ui(UiMessage::Page(page.get_page().clone()));
@@ -159,15 +159,15 @@ impl UiProcessorState {
                 }
                 None => {}
             },
-            UiMessage::Page(_) => {} // ignore, (base sends this, doesnt process it)
-            UiMessage::UpdateElementsFor(_, _) => {} // ignore, (base sends this, doesnt process it)
-            UiMessage::Dataset(_, _) => {} // ignore, (base sends this, doesnt process it)
+            UiMessage::Page(_) => {} // ignore, (base sends this, doesn't process it)
+            UiMessage::UpdateElementsFor(_, _) => {} // ignore, (base sends this, doesn't process it)
+            UiMessage::Dataset(_, _) => {} // ignore, (base sends this, doesn't process it)
             UiMessage::InputFor(peripheral_id, element_id, dataset_ids, input) => {
                 // if this is for the settings page, put it there
                 if self.state.self_id().await == peripheral_id {
                     self.settings_input(rel, &element_id, dataset_ids, input).await;
                 }else{
-                    // recieve an input from the ui and route it to the peripheral
+                    // receive an input from the ui and route it to the peripheral
                     let msg = Message::Ui(UiMessage::Input(element_id, dataset_ids, input));
                     let rel = Relation {
                         role: Role::Peripheral,
@@ -209,12 +209,12 @@ impl UiProcessorState {
                         );
                         self.ui_to_subscribers(msg).await;
                         // handle summary changes
-                        self.update_dataset_summary(summary);
+                        self.update_dataset_summary(summary).await;
                     }
                     None => {} // no page to update
                 }
             }
-            UiMessage::Input(..) => {} // ignore, (base sends this, doesnt process it)
+            UiMessage::Input(..) => {} // ignore, (base sends this, doesn't process it)
         }
     }
 

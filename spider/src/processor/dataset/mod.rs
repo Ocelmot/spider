@@ -9,15 +9,17 @@ use crate::{config::SpiderConfig, state_data::StateData};
 use super::{link::ProcessorLink, ui::UiProcessorMessage};
 
 mod message;
-use tracing::info;
 pub use message::DatasetProcessorMessage;
+use tracing::info;
 
 use spider_link::{
-    message::{AbsoluteDatasetPath, AbsoluteDatasetScope, DatasetData, DatasetMessage, Message, UiMessage},
+    message::{
+        AbsoluteDatasetPath, AbsoluteDatasetScope, DatasetData, DatasetMessage, Message, UiMessage,
+    },
     Relation, SpiderId2048,
 };
 use tokio::{
-    fs::{OpenOptions, create_dir_all},
+    fs::{create_dir_all, OpenOptions},
     io::{AsyncReadExt, AsyncWriteExt},
     sync::mpsc::{channel, error::SendError, Receiver, Sender},
     task::{JoinError, JoinHandle},
@@ -114,17 +116,17 @@ impl DatasetProcessorState {
                         }
                     }
                     DatasetProcessorMessage::UiUnsubscribe(k) => {
-                        match self.subscriptions.get_mut(&k){
+                        match self.subscriptions.get_mut(&k) {
                             Some(h_set) => {
                                 h_set.remove(&DatasetSubscriber::Ui);
                                 // if the set is empty, remove it from the map
-                                if h_set.is_empty(){
+                                if h_set.is_empty() {
                                     self.subscriptions.remove(&k);
                                 }
-                            },
+                            }
                             None => {
                                 // if no set, there was no subscription after all!
-                            },
+                            }
                         }
                     }
                     DatasetProcessorMessage::ToUi(relation, path) => {
@@ -251,7 +253,6 @@ impl DatasetProcessorState {
                 // write to file
                 write_dataset(&file_path, dataset.clone()).await;
                 self.message_subscribed(path, &dataset).await;
-
             }
             DatasetMessage::Dataset { .. } => {} //base sends this, not recieve (Could use as an assignment operation)
         }
@@ -322,7 +323,7 @@ async fn parse_dataset(path: &Path) -> Vec<DatasetData> {
         .unwrap();
     let mut data: String = String::new();
     file.read_to_string(&mut data).await;
-    if data.len() == 0{
+    if data.len() == 0 {
         data = String::from("[]");
     }
     serde_json::from_str(&data).unwrap()

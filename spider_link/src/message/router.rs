@@ -64,6 +64,10 @@ pub enum RouterMessage {
 
     // Invitation messages
     /// An invite that can be sent to another node, allowing them to connect.
+    /// 
+    /// When sent from the base to a peripheral, this is a newly generated
+    /// invite to be sent. When sent to the base, this is an Invite from another
+    /// user and will be used to try to connect to them.
     Invite(Invite),
 
     /// Request that an invite of the indicated type be sent to the peripheral.

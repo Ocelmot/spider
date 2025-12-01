@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 use tokio::{sync::mpsc::channel, time::{Duration, Instant}};
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::trace;
 
 use crate::{
     link::{protocol::LinkProtocol, PinnedLink},
@@ -103,6 +104,7 @@ impl InstrumentLink {
     }
 
     fn add_latency(&mut self, latency: Duration) {
+        trace!("Adding latency: {}ms", latency.as_millis());
         self.recent.push_front(latency);
         self.recent.truncate(HISTORY_LEN);
     }

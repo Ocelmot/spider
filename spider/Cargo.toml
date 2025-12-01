@@ -13,8 +13,8 @@ spider_link = { git = "https://github.com/Ocelmot/spider" }
 tokio = { version = "1", features = ["full"] }
 console-subscriber = "0.4.1"
 
-veilid-core = "0.4.3"
-veilid-tools = "0.4.3"
+# veilid-core = "0.4.3"
+# veilid-tools = "0.4.3"
 
 toml = "0.8.19"
 serde_json = "1.0.73"

@@ -331,19 +331,19 @@ impl RouterProcessorState {
                     let _ = link.send(msg).await;
 
                     // Send our address to them
-                    if self.pl.config().veilid_enabled() {
-                        let dht = self.pl.state().veilid_own_dht().await;
-                        if let Some(addr) = dht.deref() {
-                            let addr = addr.key().to_string();
-                            let msg = RouterMessage::Addrs(vec![addr]);
-                            let msg = Message::Router(msg);
-                            let _ = link.send(msg).await;
-                        }else{
-                            trace!("No veilid address stored");
-                        }
-                    }else{
-                        trace!("Veilid not enabled");
-                    }
+                    // if self.pl.config().veilid_enabled() {
+                    //     let dht = self.pl.state().veilid_own_dht().await;
+                    //     if let Some(addr) = dht.deref() {
+                    //         let addr = addr.key().to_string();
+                    //         let msg = RouterMessage::Addrs(vec![addr]);
+                    //         let msg = Message::Router(msg);
+                    //         let _ = link.send(msg).await;
+                    //     }else{
+                    //         trace!("No veilid address stored");
+                    //     }
+                    // }else{
+                    //     trace!("Veilid not enabled");
+                    // }
                 }
             }
             RouterProcessorMessage::UnapprovedMessage(rel, msg) => {
@@ -493,10 +493,10 @@ impl RouterProcessorState {
                 self.directory.remove_subscriber(&rel);
             }
             RouterMessage::AddIdentity(_) => {
-                // base send this, doesnt recieve
+                // base send this, doesn't receive
             }
             RouterMessage::RemoveIdentity(_) => {
-                // base send this, doesnt recieve
+                // base send this, doesn't receive
             }
             RouterMessage::SetIdentityProperty(key, value) => {
                 self.directory.set_self_property(rel, key, value).await;

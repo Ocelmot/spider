@@ -29,6 +29,14 @@ impl SliceManager {
         Self { epoch, seq, data, slices }
     }
 
+    pub fn set_epoch(&mut self, epoch: u64){
+        self.epoch = epoch;
+    }
+
+    pub fn set_seq(&mut self, seq: u64) {
+        self.seq = seq;
+    }
+
     pub fn is_full(&self)->bool{
         if self.slices.len() == 1 {
             self.slices.first_key_value().unwrap() == (&0u64, &((self.data.len()-1) as u64))

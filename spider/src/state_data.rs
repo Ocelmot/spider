@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use veilid_core::DHTRecordDescriptor;
+// use veilid_core::DHTRecordDescriptor;
 
 use rsa::{
     pkcs8::{DecodePrivateKey, EncodePrivateKey},
@@ -80,10 +80,11 @@ impl StateData {
         MutexGuard::map(inner, |i| i.name.get_or_insert(String::from("NoName")))
     }
 
-    pub async fn veilid_own_dht(&self) -> MappedMutexGuard<'_, Option<DHTRecordDescriptor>> {
-        let inner = self.inner.lock().await;
-        MutexGuard::map(inner, |i| &mut i.veilid_own_dht)
-    }
+    // pub async fn veilid_own_dht(&self) -> MappedMutexGuard<'_, Option<()>> {
+    //     let inner = self.inner.lock().await;
+    //     // MutexGuard::map(inner, |i| &mut i.veilid_own_dht)
+    //     MutexGuard::map(inner, |i| None)
+    // }
 
     pub async fn load_directory(&self) -> HashMap<Relation, DirectoryEntry> {
         let inner = self.inner.lock().await;
@@ -116,8 +117,8 @@ struct StateDataInner {
     #[serde(default)]
     name: Option<String>,
     /// Map from chord names to listen_adder, pub_addr, and vectors of recent addresses
-    #[serde(default)]
-    veilid_own_dht: Option<DHTRecordDescriptor>,
+    // #[serde(default)]
+    // veilid_own_dht: Option<DHTRecordDescriptor>,
 
     #[serde(default)]
     directory: Vec<DirectoryEntry>,
@@ -133,7 +134,7 @@ impl StateDataInner {
 
             // Router Items
             name: None,
-            veilid_own_dht: None,
+            // veilid_own_dht: None,
             directory: Vec::new(),
         }
     }

@@ -500,7 +500,7 @@ impl Link for TCPLink {
                 let chunk = chunk?;
                 let mut chunk = VecDeque::from(chunk);
                 let x = LinkProtocol::deserialize(&mut chunk);
-                // debug!("Receiving msg (taken reader): {:?}", x);
+                debug!("Receiving msg (taken reader): {:?}", x);
                 tx.send(x?).await.wrap()?;
             }
             #[allow(unreachable_code)]

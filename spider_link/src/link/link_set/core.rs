@@ -6,13 +6,13 @@ use std::{
 };
 
 use futures::{stream::SelectAll, StreamExt};
-use rand::{prelude::Distribution, thread_rng};
+use rand::{prelude::Distribution, random, thread_rng};
 use tokio::{
     select,
     sync::mpsc::{channel, Receiver, Sender},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, info, instrument, trace};
+use tracing::{Instrument, debug, info, instrument, trace, trace_span};
 
 use crate::{
     error::{ErrorKind, ProblemWrap},
@@ -64,6 +64,8 @@ pub struct LinkSetCore {
     next_link_index: u64,
     /// maps outgoing slices' seq numbers to a slice manager
     outgoing_slices: BTreeMap<u64, SliceManager>,
+    /// messages that are to be sent when we get a new epoch
+    pending_slices: Vec<SliceManager>,
     /// The next sequence number to assign to an incoming message
     next_seq: u64,
 
@@ -107,6 +109,7 @@ impl LinkSetCore {
             links: Vec::new(),
             next_link_index: 0,
             outgoing_slices: BTreeMap::new(),
+            pending_slices: Vec::new(),
             next_seq: 1,
 
             readers: SelectAll::new(),
@@ -116,19 +119,21 @@ impl LinkSetCore {
             resend: Deadline::new(),
             upkeep: Deadline::new_repeat(UPKEEP),
         };
+        let span = trace_span!("LinkSet", ID = random::<u16>());
         tokio::spawn(async move {
             loop {
                 core.process().await?;
             }
             #[allow(unreachable_code)]
             LinkResult::Ok(())
-        });
+        }.instrument(span));
 
         (to_core, from_core)
     }
 
     async fn process(&mut self) -> LinkResult {
         trace!("LinkSetCore processing");
+        trace!("Readers: {} Links: {}", self.readers.len(), self.links.len());
         select! {
             ctrl_msg = self.rx.recv() => {
                 self.process_control(ctrl_msg).await?;
@@ -245,7 +250,17 @@ impl LinkSetCore {
                 self.next_seq += 1;
                 let data = serde_json::to_vec(&message).wrap()?;
                 let mgr = SliceManager::from_vec(self.epoch, seq, data);
-                self.outgoing_slices.insert(seq, mgr);
+
+                // if the core is not connected or is connected and resetting,
+                // and the message's epoch is none, add message to pending
+                // connection messages. Else, add to outgoing slices
+                if !self.state.is_connected() || self.resetting {
+                    if epoch.is_none() {
+                        self.pending_slices.push(mgr);
+                    }
+                }else{
+                    self.outgoing_slices.insert(seq, mgr);
+                }
 
                 // if connected, send
                 if let CoreState::Connected = self.state {
@@ -296,6 +311,14 @@ impl LinkSetCore {
                             Ordering::Equal => {
                                 // on the same page, stop resetting. Reply with our own reset/epoch
                                 self.send_reset(false).await;
+                                // clear outgoing messages, insert pending messages
+                                self.outgoing_slices.clear();
+                                for mut msg in self.pending_slices.drain(..){
+                                    msg.set_epoch(self.epoch);
+                                    msg.set_seq(self.next_seq);
+                                    self.outgoing_slices.insert(self.next_seq, msg);
+                                    self.next_seq += 1;
+                                }
                                 // send all pending messages
                                 self.send_all_slices().await;
                                 self.resend.set_deadline_from_now(RESEND);
@@ -323,7 +346,16 @@ impl LinkSetCore {
                         // check for confirmation of epoch, then start
                         if *epoch == self.epoch {
                             trace!("epoch match");
-                            // send all pending messages
+                            // clear outgoing messages, insert pending messages
+                            self.outgoing_slices.clear();
+                            for mut msg in self.pending_slices.drain(..){
+                                msg.set_epoch(self.epoch);
+                                msg.set_seq(self.next_seq);
+                                self.outgoing_slices.insert(self.next_seq, msg);
+                                self.next_seq += 1;
+                            }
+
+                            // send all outgoing messages
                             self.send_all_slices().await;
                             self.resend.set_deadline_from_now(RESEND);
 

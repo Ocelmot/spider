@@ -101,7 +101,6 @@ async fn main() -> Result<(), io::Error> {
     trace!("trace");
     debug!("debug");
 
-
     info!("Starting!");
     info!("Loaded config: {:?}", config);
 

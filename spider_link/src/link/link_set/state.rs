@@ -21,7 +21,14 @@ pub enum CoreState {
 }
 
 impl CoreState {
-    /// The state is connecting in some way.
+    pub(crate) fn is_connected(&self) -> bool {
+        match self {
+            CoreState::Connected => true,
+            _ => false,
+        }
+    }
+
+    /// The state is actively trying to move to the connected state.
     pub(crate) fn has_connector(&self) -> bool {
         match self {
             CoreState::Disconnected => false,
