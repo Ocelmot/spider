@@ -20,8 +20,19 @@
 pub(crate) mod error;
 pub(crate) use error::{LinkError, LinkResult};
 
-pub mod link;
-// pub use link::Link;
+/// A link set represents all the connections between two members of the spider
+/// network. This makes supporting multiple protocols easier, since it manages
+/// when more than one of them are in use at a time. 
+pub mod link_set {
+    pub use link_set::*;
+	/// Implementations of the link trait for supported connection protocols
+	pub mod impls {
+		pub use crate::link_set_impls::*;
+	}
+}
+mod link_set_impls;
+
+pub mod identified_link;
 pub mod id;
 pub mod message;
 use id::SpiderId;

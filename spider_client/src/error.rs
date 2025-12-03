@@ -6,6 +6,8 @@
 
 use std::{error::Error, fmt::Display};
 
+use spider_link::link_set::LinkSetError;
+
 /// Defines an error returned from the Spider Client crate
 pub type ClientResult<T = ()> = Result<T, ClientError>;
 
@@ -117,6 +119,9 @@ pub enum ErrorKind {
     /// Failed to read or write to the disk
     IO,
 
+    /// A link set has failed
+    LinkSetError,
+
     /// Other problems
     Misc,
 }
@@ -211,5 +216,11 @@ impl Error for ClientError {
         self.source
             .as_deref()
             .map(|source| source as &(dyn Error + 'static))
+    }
+}
+
+impl From<LinkSetError> for ClientError {
+    fn from(value: LinkSetError) -> Self {
+        Self { kind: ErrorKind::LinkSetError, msg: Some(format!("{}", value)), source: Some(Box::new(value)) }
     }
 }

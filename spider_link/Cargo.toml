@@ -6,13 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+link_set = { git = "https://github.com/Ocelmot/link_set", features = ["serde"] }
 
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.16"
-tracing = "0.1"
-
-# veilid-core = "0.4.3"
-# veilid-tools = "0.4.3"
+tracing = {version = "0.1", features = ["log"]}
 
 serde = { version = "1.0.132", features = ["derive", "rc"] }
 serde_with = "3.7.0"

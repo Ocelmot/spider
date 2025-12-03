@@ -1,10 +1,10 @@
 
 use spider_client::{
     link::{
-        link::{LinkSet, TCPLink}, message::{DatasetData, Message, RouterMessage}, SelfRelation
+         message::{DatasetData, Message, RouterMessage}, SelfRelation
     }, ClientResponse, SpiderClientBuilder
 };
-use spider_link::{beacon::start_beacon_listen_handler, link::LinkSetMsg};
+use spider_link::{beacon::start_beacon_listen_handler, link_set::{Epoch, LinkSet, LinkSetMessage, impls::TCPLink}, };
 use tracing::info;
 use tracing_test::traced_test;
 use serial_test::serial;
@@ -42,18 +42,18 @@ async fn connect() {
 
     info!("Setting up listen link set");
     let host_link = listener.recv().await.expect("listener failed to get Link");
-    let mut listen_link_set = LinkSet::new(host_relation.clone(), client_relation.relation);
-    listen_link_set.add_link(host_link).await.unwrap();
+    let mut listen_link_set = LinkSet::new();
+    listen_link_set.add_link(Box::new(host_link)).await.unwrap();
 
     info!("Receiving connect message");
     let msg = listen_link_set.recv().await.expect("listen link closed");
-    let LinkSetMsg::Connected(epoch) = msg else {panic!("Incorrect message")};
-    assert_eq!(epoch, 0);
+    let LinkSetMessage::Connected(epoch) = msg else {panic!("Incorrect message")};
+    assert_eq!(epoch, Epoch::ONE);
 
     info!("Receiving sent message");
     let msg = listen_link_set.recv().await.expect("listen link closed");
-    let LinkSetMsg::Message(msg, epoch) = msg else {panic!("Incorrect message");};
-    assert_eq!(epoch, 0);
+    let LinkSetMessage::Message(msg, epoch) = msg else {panic!("Incorrect message");};
+    assert_eq!(epoch, Epoch::ONE);
     let Message::Router(msg) = msg else{panic!("Incorrect message type");};
     let RouterMessage::Event(name, rel, _) = msg else{panic!("Incorrect message type");};
     
@@ -97,18 +97,18 @@ async fn beacon_connect() {
 
     info!("Setting up listen link set");
     let host_link = listener.recv().await.expect("listener failed to get Link");
-    let mut listen_link_set = LinkSet::new(host_relation.clone(), client_relation.relation);
-    listen_link_set.add_link(host_link).await.unwrap();
+    let mut listen_link_set = LinkSet::new();
+    listen_link_set.add_link(Box::new(host_link)).await.unwrap();
 
     info!("Receiving connect message");
     let msg = listen_link_set.recv().await.expect("listen link closed");
-    let LinkSetMsg::Connected(epoch) = msg else {panic!("Incorrect message")};
-    assert_eq!(epoch, 0);
+    let LinkSetMessage::Connected(epoch) = msg else {panic!("Incorrect message")};
+    assert_eq!(epoch, Epoch::ONE);
 
     info!("Receiving sent message");
     let msg = listen_link_set.recv().await.expect("listen link closed");
-    let LinkSetMsg::Message(msg, epoch) = msg else {panic!("Incorrect message");};
-    assert_eq!(epoch, 0);
+    let LinkSetMessage::Message(msg, epoch) = msg else {panic!("Incorrect message");};
+    assert_eq!(epoch, Epoch::ONE);
     let Message::Router(msg) = msg else{panic!("Incorrect message type");};
     let RouterMessage::Event(name, rel, _) = msg else{panic!("Incorrect message type");};
     
@@ -151,20 +151,20 @@ async fn client_round_trip() {
 
     info!("Setting up listen link set");
     let host_link = listener.recv().await.expect("listener failed to get Link");
-    let mut listen_link_set = LinkSet::new(host_relation.clone(), client_relation.relation.clone());
-    listen_link_set.add_link(host_link).await.unwrap();
+    let mut listen_link_set = LinkSet::new();
+    listen_link_set.add_link(Box::new(host_link)).await.unwrap();
 
     // From client to listener
 
     info!("Listener receiving connect message");
     let msg = listen_link_set.recv().await.expect("listen link closed");
-    let LinkSetMsg::Connected(epoch) = msg else {panic!("Incorrect message")};
-    assert_eq!(epoch, 0);
+    let LinkSetMessage::Connected(epoch) = msg else {panic!("Incorrect message")};
+    assert_eq!(epoch, Epoch::ONE);
 
     info!("Listener receiving sent message");
     let msg = listen_link_set.recv().await.expect("listen link closed");
-    let LinkSetMsg::Message(msg, epoch) = msg else {panic!("Incorrect message");};
-    assert_eq!(epoch, 0);
+    let LinkSetMessage::Message(msg, epoch) = msg else {panic!("Incorrect message");};
+    assert_eq!(epoch, Epoch::ONE);
     let Message::Router(msg) = msg else{panic!("Incorrect message type");};
     let RouterMessage::Event(name, rel, _) = msg else{panic!("Incorrect message type");};
     

@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 
 use spider_link::Relation;
+use spider_link::link_set::Epoch;
 use tracing::debug;
 use spider_link::{message::Message, SpiderId2048};
 use tokio::sync::mpsc::{unbounded_channel, Sender, UnboundedReceiver};
@@ -113,7 +114,7 @@ impl ClientChannel {
     /// Register a function to be called with all subsequent messages.
     pub async fn set_on_message<F>(&self, cb: Option<F>)
     where
-        F: FnMut(&ClientChannel, Message, u64) + Send + 'static,
+        F: FnMut(&ClientChannel, Message, Epoch) + Send + 'static,
     {
         self.sender
             .send(ClientControl::SetOnMessage(match cb {
@@ -127,7 +128,7 @@ impl ClientChannel {
     /// Register a function to be called when the channel becomes connected.
     pub async fn set_on_connect<F>(&self, cb: Option<F>)
     where
-        F: FnMut(&ClientChannel, u64) + Send + 'static,
+        F: FnMut(&ClientChannel, Epoch) + Send + 'static,
     {
         self.sender
             .send(ClientControl::SetOnConnect(match cb {

@@ -6,14 +6,11 @@ use std::{
 };
 
 use crate::{
-    error::{ErrorKind, Problem, ProblemWrap},
-    message::KeyRequest,
-    LinkError, LinkResult, Relation, SelfRelation,
+    LinkError, LinkResult, Relation, SelfRelation, error::{ErrorKind, Problem, ProblemWrap}, identified_link::IdentifiedLink, link_set::links::Link, link_set_impls::{LinkImplError, LinkImplResult}, message::KeyRequest
 };
 
-use crate::link::{Link, LinkProtocol};
-
 use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, Key, KeyInit, Nonce};
+use link_set::{links::LinkReader, LinkProtocol};
 use num_bigint::BigUint;
 use rand::{rngs::OsRng, RngCore};
 use tokio::{
@@ -268,6 +265,18 @@ impl TCPLink {
         )
         .await
     }
+
+
+}
+
+impl IdentifiedLink for TCPLink {
+    // fn self_relation(&self) -> &SelfRelation {
+    //     &self.self_relation
+    // }
+
+    fn other_relation(&self) -> &Relation {
+        &self.other_relation
+    }
 }
 
 async fn send_stream_init(
@@ -421,12 +430,14 @@ async fn recv_chunk(
         }
     };
 
-    
     loop {
         // if we have enough data in the read buffer, return it
         if len <= buffer.len() as u32 {
             let mut ciphertext = Vec::with_capacity(len as usize);
-            buffer.take(len.into()).read_to_end(&mut ciphertext).wrap()?;
+            buffer
+                .take(len.into())
+                .read_to_end(&mut ciphertext)
+                .wrap()?;
 
             // Decrypt buffer
             let their_key = Key::from(key);
@@ -438,7 +449,7 @@ async fn recv_chunk(
             if plaintext.is_err() {
                 error!("Decrypting buffer returned {:?}", plaintext);
             }
-            
+
             // let ret = ret?;
             *nonce += 1u32;
             *length = None;
@@ -452,36 +463,39 @@ async fn recv_chunk(
     }
 }
 
+pub struct TcpLinkReader(Receiver<LinkProtocol>);
+
+impl LinkReader for TcpLinkReader {
+    async fn read(&mut self) -> Result<LinkProtocol, LinkImplError> {
+        self.0.recv().await.ok_or(LinkImplError::Closed)
+    }
+}
+
 impl Link for TCPLink {
 
-    fn self_relation(&self) -> &SelfRelation {
-        &self.self_relation
-    }
-
-    fn other_relation(&self) -> &Relation {
-        &self.other_relation
-    }
-
-    async fn send(&mut self, msg: LinkProtocol) -> LinkResult {
+    async fn send(&mut self, msg: LinkProtocol) -> Result<(), impl std::error::Error + Send + Sync + 'static> {
         debug!("Sending msg {:?}", msg);
         let bytes = msg.serialize();
         self.write_chunk(&bytes)
             .await
-            .wrap_msg("Failed to write to socket")
+            .map_err(|_| LinkImplError::Closed)
     }
 
-    async fn recv(&mut self) -> LinkResult<LinkProtocol> {
-        let data = self.read_chunk().await?;
+    async fn recv(&mut self) -> Result<LinkProtocol, impl std::error::Error + Send + Sync + 'static> {
+        let data = self.read_chunk().await.map_err(|_| LinkImplError::Closed)?;
         let mut data = VecDeque::from(data);
-        let ret = LinkProtocol::deserialize(&mut data);
+        let ret = LinkProtocol::deserialize(&mut data).map_err(|_| LinkImplError::Deserialize);
         debug!("Receiving msg: {:?}", ret);
         ret
     }
 
     /// Splits the read portion and write portion of this TCP Link, returning a
     /// Receiver<LinkProtocol> from which incoming messages can be received.
-    fn take_reader(&mut self) -> LinkResult<Receiver<LinkProtocol>> {
-        let mut reader = self.socket_reader.take().wrap_msg("Reader already taken")?;
+    fn take_reader(&mut self) -> Result<impl LinkReader + 'static, LinkImplError> {
+        let mut reader = self
+            .socket_reader
+            .take()
+            .ok_or(LinkImplError::ReceiverTaken)?;
         let other_key = self.other_key.clone();
         let mut other_nonce = self.other_nonce.clone();
         let mut read_len = self.read_len.take();
@@ -497,17 +511,18 @@ impl Link for TCPLink {
                     &mut read_buffer,
                 )
                 .await;
-                let chunk = chunk?;
+                let chunk = chunk.map_err(|_| LinkImplError::Closed)?;
                 let mut chunk = VecDeque::from(chunk);
-                let x = LinkProtocol::deserialize(&mut chunk);
+                let x =
+                    LinkProtocol::deserialize(&mut chunk).map_err(|_| LinkImplError::Deserialize);
                 debug!("Receiving msg (taken reader): {:?}", x);
-                tx.send(x?).await.wrap()?;
+                tx.send(x?).await.map_err(|_| LinkImplError::Closed)?;
             }
             #[allow(unreachable_code)]
-            Ok::<(), LinkError>(())
+            Ok::<(), LinkImplError>(())
         });
 
-        Ok(rx)
+        Ok(TcpLinkReader(rx))
     }
 
     fn max_size(&self) -> u32 {

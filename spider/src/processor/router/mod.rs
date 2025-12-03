@@ -1,13 +1,12 @@
 use std::{
-    collections::{HashMap, HashSet}, ops::Deref, sync::Arc
+    collections::{HashMap, HashSet},
+    sync::Arc,
 };
 
 use directory::Directory;
 use pending::PendingManager;
 use spider_link::{
-    link::{LinkSet, LinkSetMsg, PinnedLink, TCPLink, },
-    message::{Invite, Message, RouterMessage},
-    Relation,
+    Relation, identified_link::IdentifiedLink, link_set::{Epoch, LinkSet, LinkSetMessage, impls::TCPLink, links::PinnedLink}, message::{Invite, Message, RouterMessage}
 };
 use tokio::{
     select,
@@ -23,7 +22,6 @@ use rand::{
     distributions::Alphanumeric, rngs::StdRng, seq::SliceRandom, thread_rng, Rng, SeedableRng,
 };
 use tracing::trace;
-// use veilid_core::VeilidConfigInner;
 
 use crate::error::{ProblemWrap, SpiderError, SpiderResult};
 
@@ -72,7 +70,7 @@ pub(crate) struct RouterProcessorState {
     receiver: Receiver<RouterProcessorMessage>,
 
     key_req: Arc<Mutex<Option<String>>>,
-    listeners: Receiver<Box<dyn PinnedLink>>,
+    listeners: Receiver<Box<dyn IdentifiedLink>>,
 
     // Directory
     directory: Directory,
@@ -81,11 +79,10 @@ pub(crate) struct RouterProcessorState {
     pending: PendingManager,
 
     /// Current LinkSets
-    links: HashMap<Relation, LinkSet>,
+    links: HashMap<Relation, LinkSet<Message>>,
 
     // Event items
     event_subscribers: HashMap<String, HashSet<Relation>>,
-
     // veilid: VeilidHub,
 }
 
@@ -103,7 +100,7 @@ impl RouterProcessorState {
             pending.add_ui_permit();
         }
 
-        let (listen_tx, listen_rx) = channel(10);
+        let (listen_tx, listen_rx) = channel::<Box<dyn IdentifiedLink>>(10);
 
         // set up tcp listener
         let name = pl.state().name().await.clone();
@@ -121,34 +118,11 @@ impl RouterProcessorState {
         tokio::spawn(async move {
             loop {
                 match tcp_listener.recv().await {
-                    Some(link) => task_tx.send(link.into()).await,
+                    Some(link) => task_tx.send(Box::new(link)).await,
                     None => break,
                 };
             }
         });
-
-        // set up veilid listener
-        // let listen_rel = pl.state().self_relation().await;
-        // let listen_dht = pl.state().veilid_own_dht().await.clone();
-        // let config = veilid_config();
-        // trace!("Creating Veilid hub");
-        // let (veilid, mut veilid_listener) = VeilidHub::new(listen_rel, listen_dht, config)
-        //     .await
-        //     .wrap()?;
-        // trace!("Spawning Veilid listener");
-        // let task_tx = listen_tx.clone();
-        // tokio::spawn(async move {
-        //     loop {
-        //         match veilid_listener.recv().await {
-        //             Some(link) => task_tx.send(link.into()).await,
-        //             None => break,
-        //         };
-        //     }
-        // });
-        // if pl.state().veilid_own_dht().await.is_none() {
-        //     let dht = veilid.listen_dht().clone();
-        //     *pl.state().veilid_own_dht().await = Some(dht);
-        // }
 
         Ok(Self {
             pl,
@@ -165,7 +139,6 @@ impl RouterProcessorState {
             links: HashMap::new(),
 
             event_subscribers: HashMap::new(),
-
             // veilid,
         })
     }
@@ -177,7 +150,7 @@ impl RouterProcessorState {
                 select! {
                     Some(link) = self.listeners.recv(), if !self.listeners.is_closed() => {
                         trace!("RouterProcessor got new link");
-                        match self.directory.is_approved(&*link) {
+                        match self.directory.is_link_approved(link.other_relation()) {
                             directory::LinkApproval::Blocked => {
                                 // do nothing, close the link
                                 trace!("Link blocked")
@@ -232,7 +205,7 @@ impl RouterProcessorState {
 
     async fn insert_link<L>(&mut self, link: L) -> SpiderResult
     where
-        L: Into<Box<dyn PinnedLink>> + 'static,
+        L: Into<Box<dyn IdentifiedLink>> + 'static,
     {
         let link = link.into();
         let rel = link.other_relation().clone();
@@ -250,8 +223,8 @@ impl RouterProcessorState {
                 tokio::spawn(async move {
                     loop {
                         match recv.recv().await {
-                            Some(msg) => match msg {
-                                LinkSetMsg::Disconnected => {
+                            Ok(msg) => match msg {
+                                LinkSetMessage::Disconnected => {
                                     info!("link disconnected");
                                     if task_channel
                                         .send(RouterProcessorMessage::Disconnected(
@@ -263,8 +236,8 @@ impl RouterProcessorState {
                                         break;
                                     }
                                 }
-                                LinkSetMsg::Connecting(_) => {} // The base's link_sets do not have reconnect enabled
-                                LinkSetMsg::Message(message, _) => {
+                                LinkSetMessage::Connecting(_) => {} // The base's link_sets do not have reconnect enabled
+                                LinkSetMessage::Message(message, _) => {
                                     if task_channel
                                         .send(RouterProcessorMessage::UnapprovedMessage(
                                             task_rel.clone(),
@@ -276,7 +249,7 @@ impl RouterProcessorState {
                                         break;
                                     }
                                 }
-                                LinkSetMsg::Connected(epoch) => {
+                                LinkSetMessage::Connected(epoch) => {
                                     info!("link connected with epoch {}", epoch);
                                     if task_channel
                                         .send(RouterProcessorMessage::Connected(
@@ -290,7 +263,7 @@ impl RouterProcessorState {
                                     }
                                 }
                             },
-                            None => break,
+                            Err(_) => break,
                         }
                     }
                 });
@@ -318,8 +291,8 @@ impl RouterProcessorState {
             RouterProcessorMessage::AddApprovalCode(code) => {
                 self.pending.add_approval_code(code).await;
             }
-            RouterProcessorMessage::ApprovedConnection(backlog, link_set) => {
-                self.approved_connection_handler(backlog, link_set).await;
+            RouterProcessorMessage::ApprovedConnection(rel, backlog, link_set) => {
+                self.approved_connection_handler(rel, backlog, link_set).await;
             }
 
             RouterProcessorMessage::Connected(rel, epoch) => {
@@ -351,7 +324,8 @@ impl RouterProcessorState {
                     debug!("Approved message: {:?}", msg);
                     self.pl
                         .send(ProcessorMessage::RemoteMessage(rel, msg))
-                        .await.wrap()?;
+                        .await
+                        .wrap()?;
                 }
             }
             RouterProcessorMessage::Disconnected(_rel) => {}
@@ -514,8 +488,9 @@ impl RouterProcessorState {
 
     async fn approved_connection_handler(
         &mut self,
-        backlog: Vec<(Message, u64)>,
-        mut link_set: LinkSet,
+        relation: Relation,
+        backlog: Vec<(Message, Epoch)>,
+        mut link_set: LinkSet<Message>,
     ) {
         info!("Connection Approved");
 
@@ -524,7 +499,7 @@ impl RouterProcessorState {
             Some(rx) => rx,
             None => return,
         };
-        let relation = link_set.other_relation().clone();
+        // let relation = link_set.other_relation().clone();
 
         // Inform other side that the connection is approved.
         let msg = Message::Router(RouterMessage::Approved);
@@ -549,13 +524,13 @@ impl RouterProcessorState {
         let pl = self.pl.clone();
         tokio::spawn(async move {
             loop {
-                let Some(msg) = rx.recv().await else { break };
+                let Ok(msg) = rx.recv().await else { break };
 
                 match msg {
-                    LinkSetMsg::Disconnected => {}
-                    LinkSetMsg::Connected(_) => {}
-                    LinkSetMsg::Connecting(_) => {}
-                    LinkSetMsg::Message(message, _) => {
+                    LinkSetMessage::Disconnected => {}
+                    LinkSetMessage::Connected(_) => {}
+                    LinkSetMessage::Connecting(_) => {}
+                    LinkSetMessage::Message(message, _) => {
                         let msg = ProcessorMessage::RemoteMessage(relation.clone(), message);
                         if pl.send(msg).await.is_err() {
                             // If processor has stopped, disconnect
@@ -718,9 +693,9 @@ impl RouterProcessorState {
         self.pl.send_ui(msg).await;
     }
 
-    async fn create_link_set(&self, rel: Relation) -> SpiderResult<LinkSet> {
+    async fn create_link_set(&self, rel: Relation) -> SpiderResult<LinkSet<Message>> {
         let self_rel = self.pl.state().self_relation().await;
-        let link_set = LinkSet::new(self_rel, rel.clone());
+        let link_set = LinkSet::new();
 
         // add known addrs
         if let Some(addrs) = self.directory.get_system_property(&rel, "addrs") {
@@ -731,7 +706,14 @@ impl RouterProcessorState {
         };
 
         // add tcp link capability
-        link_set.add_connector(TCPLink::connect).await.wrap()?;
+        link_set
+            .add_connector(move |addr| {
+                let sr = self_rel.clone();
+                let r = rel.clone();
+                async { TCPLink::connect(sr, r, addr).await.map_err(|_| spider_link::link_set::LinkSetError::Closed) }
+            })
+            .await
+            .wrap()?;
 
         // TODO: make the link capabilities variable
 
@@ -747,24 +729,3 @@ impl RouterProcessorState {
         Ok(link_set)
     }
 }
-
-// fn veilid_config() -> VeilidConfigInner {
-//     VeilidConfigInner {
-//         program_name: "Spider".into(),
-//         namespace: "spider".into(),
-//         protected_store: veilid_core::VeilidConfigProtectedStore {
-//             directory: "./.veilid/block_store".into(),
-//             allow_insecure_fallback: true,
-//             ..Default::default()
-//         },
-//         block_store: veilid_core::VeilidConfigBlockStore {
-//             directory: "./.veilid/block_store".into(),
-//             ..Default::default()
-//         },
-//         table_store: veilid_core::VeilidConfigTableStore {
-//             directory: "./.veilid/table_store".into(),
-//             ..Default::default()
-//         },
-//         ..Default::default()
-//     }
-// }

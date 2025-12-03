@@ -3,7 +3,7 @@ use std::{path::PathBuf, time::Duration};
 
 use spider_link::{
     beacon::Beacon,
-    link::{LinkSet, LinkSetMsg, TCPLink},
+    link_set::{impls::TCPLink, Epoch, LinkSet, LinkSetError, LinkSetMessage},
     message::{Message, RouterMessage},
 };
 use tokio::{
@@ -12,25 +12,24 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{error, info, trace};
-// use veilid_core::{VeilidConfigInner, VeilidConfigNetwork};
 
 use crate::{
     client_message::{ClientControl, ClientResponse},
     error::{ClientError, ClientResult, ErrorKind, Problem, ProblemWrap},
     state::SpiderClientState,
-    // veilid_hub_registry::RegistryEntry,
-    ClientChannel, SpiderClientBuilder,
+    ClientChannel,
+    SpiderClientBuilder,
 };
 
 pub(crate) struct SpiderClientProcessor {
     state_path: Option<PathBuf>,
     state: SpiderClientState,
-    link_set: Option<LinkSet>,
+    link_set: Option<LinkSet<Message>>,
     beacon: Beacon,
     client_channel: ClientChannel,
     receiver: Receiver<ClientControl>,
-    on_message: Option<Box<dyn FnMut(&ClientChannel, Message, u64) + Send>>,
-    on_connect: Option<Box<dyn FnMut(&ClientChannel, u64) + Send>>,
+    on_message: Option<Box<dyn FnMut(&ClientChannel, Message, Epoch) + Send>>,
+    on_connect: Option<Box<dyn FnMut(&ClientChannel, Epoch) + Send>>,
     on_disconnect: Option<Box<dyn FnMut(&ClientChannel) + Send>>,
     on_terminate: Option<Box<dyn FnMut(SpiderClientBuilder) + Send>>,
     channels: Vec<UnboundedSender<ClientResponse>>,
@@ -85,23 +84,32 @@ impl SpiderClientProcessor {
             return Ok(());
         };
 
-        let link_set = LinkSet::new(self.state.self_relation.clone(), host_relation.clone());
+        let link_set = LinkSet::new();
 
         // enable reconnect capability
         if self.state.auto_reconnect {
             link_set
-                .set_reconnect(true)
+                .set_auto_connect(true)
                 .await
                 .wrap_msg("failed to set reconnect")?;
             link_set
-                .set_allow_reconnect(Some(5))
+                .set_reconnection_timeout(Some(Duration::from_secs(5)))
                 .await
                 .wrap_msg("failed to set allow_reconnect")?;
         }
 
         // enable TCP link capability
+        let sr = self.state.self_relation.clone();
+        let r = host_relation.clone();
         link_set
-            .add_connector(TCPLink::connect)
+            .add_connector( move |addr| {
+                let inner_sr = sr.clone();
+                let inner_r = r.clone();
+                async {
+                TCPLink::connect(inner_sr, inner_r, addr)
+                    .await
+                    .map_err(|e| LinkSetError::Closed)
+            }})
             .await
             .wrap_msg("failed to add_connector")?;
 
@@ -175,7 +183,7 @@ impl SpiderClientProcessor {
         Ok(())
     }
 
-    async fn dispose_link_set(&mut self, _link_set: LinkSet) -> ClientResult {
+    async fn dispose_link_set(&mut self, _link_set: LinkSet<Message>) -> ClientResult {
         // if let Some(veilid_name) = &self.state.veilid_enable {
         //     let config = get_veilid_config(&self.state, veilid_name.clone());
 
@@ -213,18 +221,18 @@ impl SpiderClientProcessor {
                         continue;
                     };
                     match link_msg {
-                        LinkSetMsg::Disconnected => {
+                        LinkSetMessage::Disconnected => {
                             connected = false;
                             self.process_client_response(ClientResponse::Disconnected).await;
                         },
-                        LinkSetMsg::Connected(epoch) => {
+                        LinkSetMessage::Connected(epoch) => {
                             connected = true;
                             self.process_client_response(ClientResponse::Connected(epoch)).await;
                         },
-                        LinkSetMsg::Connecting(re_con) => {
+                        LinkSetMessage::Connecting(re_con) => {
                             reconnecting = re_con;
                         }
-                        LinkSetMsg::Message(message, epoch) => {
+                        LinkSetMessage::Message(message, epoch) => {
                             // if the connection is pending, send saved permission code if available
                             if let Message::Router(RouterMessage::Pending) = &message {
                                 if let Some(code) = &self.state.permission_code {
@@ -399,11 +407,11 @@ impl SpiderClientProcessor {
 }
 
 async fn opt_link_set_recv(
-    ls: Option<&mut LinkSet>,
-) -> Result<(&mut LinkSet, LinkSetMsg), ClientError> {
+    ls: Option<&mut LinkSet<Message>>,
+) -> Result<(&mut LinkSet<Message>, LinkSetMessage<Message>), ClientError> {
     match ls {
         Some(ls) => {
-            let msg = ls.recv().await.wrap()?;
+            let msg = ls.recv().await?;
             Ok((ls, msg))
         }
         None => std::future::pending().await,

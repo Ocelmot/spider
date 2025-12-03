@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use phf::{phf_set, Set};
 use spider_link::{
-    link::{Link, PinnedLink},
+    
     message::{DirectoryEntry, Message, RouterMessage, UiInput},
     Relation,
 };
@@ -55,8 +55,8 @@ impl Directory {
         self.entries.is_empty()
     }
 
-    pub fn is_approved<L: PinnedLink + ?Sized>(&self, link: &L) -> LinkApproval {
-        if let Some(entry) = self.entries.get(link.other_relation()) {
+    pub fn is_link_approved(&self, rel: &Relation) -> LinkApproval {
+        if let Some(entry) = self.entries.get(rel) {
             if let Some(blocked) = entry.get("blocked") {
                 if blocked == "true" {
                     LinkApproval::Blocked

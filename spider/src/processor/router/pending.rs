@@ -5,7 +5,7 @@ use std::{
 };
 
 use tracing::info;
-use spider_link::{link::{Link, LinkSet, LinkSetMsg, PinnedLink}, message::{Message, RouterMessage, UiMessage}, Relation, SelfRelation};
+use spider_link::{ Relation, SelfRelation, identified_link::IdentifiedLink, link_set::{LinkSet, LinkSetMessage, links::PinnedLink}, message::{Message, RouterMessage, UiMessage}};
 use tokio::{
     select, spawn,
     sync::{
@@ -66,7 +66,7 @@ impl PendingManager {
         self.approval_codes.remove(&code);
     }
 
-    pub async fn add_link<L>(&mut self, link: L) where L: Into<Box<dyn PinnedLink>> + 'static {
+    pub async fn add_link<L>(&mut self, link: L) where L: Into<Box<dyn IdentifiedLink>> + 'static {
         let link = link.into();
         let rel = link.other_relation().clone();
         if let Some(pending) = self.pending_connections.get(&rel) {
@@ -160,7 +160,7 @@ pub enum PendingLinkControl {
     Deny,
     AddCode(String),
     RevokeCode(String),
-    AddLink(Box<dyn PinnedLink>)
+    AddLink(Box<dyn IdentifiedLink>)
 }
 
 
@@ -169,8 +169,8 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
     let (ctrl_tx, mut ctrl_rx) = channel(50);
     
     spawn(async move {
-        let mut link_set = LinkSet::new(self_rel, rel.clone());
-        link_set.set_allow_reconnect(Some(30)).await;
+        let mut link_set = LinkSet::<Message>::new();
+        link_set.set_grace_period_timeout(Some(Duration::from_secs(30))).await;
 
         let mut backlog = Vec::new();
         let mut codes = HashSet::new();
@@ -184,7 +184,7 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                     // handle control message
                     match msg {
                         PendingLinkControl::Approve => {
-                            let msg = RouterProcessorMessage::ApprovedConnection(backlog, link_set);
+                            let msg = RouterProcessorMessage::ApprovedConnection(rel.clone(), backlog, link_set);
                             sender.send(msg).await;
                             return;
                         },
@@ -192,7 +192,7 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                         PendingLinkControl::AddCode(code) => {
                             if let Some(recvd_code) = &recvd_code {
                                 if code == *recvd_code {
-                                    let msg = RouterProcessorMessage::ApprovedConnection(backlog, link_set);
+                                    let msg = RouterProcessorMessage::ApprovedConnection(rel.clone(), backlog, link_set);
                                     sender.send(msg).await;
                                     return; 
                                 }
@@ -212,17 +212,17 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                     let Ok(msg) = msg else {break;};
                     // handle link set message
                     match msg {
-                        LinkSetMsg::Disconnected => break,
-                        LinkSetMsg::Connected(_) => {
+                        LinkSetMessage::Disconnected => break,
+                        LinkSetMessage::Connected(_) => {
                             link_set.send(Message::Router(RouterMessage::Pending)).await;
                         },
-                        LinkSetMsg::Connecting(_) => {} // Base's link sets do not have reconnecting enabled.
-                        LinkSetMsg::Message(message, epoch) => {
+                        LinkSetMessage::Connecting(_) => {} // Base's link sets do not have reconnecting enabled.
+                        LinkSetMessage::Message(message, epoch) => {
                             
                             // check messages for incoming approval codes
                             if let Message::Router(RouterMessage::ApprovalCode(new_code)) = &message {
                                 if codes.contains(new_code) {
-                                    let msg = RouterProcessorMessage::ApprovedConnection(backlog, link_set);
+                                    let msg = RouterProcessorMessage::ApprovedConnection(rel.clone(), backlog, link_set);
                                     sender.send(msg).await;
                                     return;
                                 }else{
@@ -242,7 +242,7 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                                         // have a permit and received the ui
                                         // message, accept this connection
                                         backlog.push((message, epoch));
-                                        let msg = RouterProcessorMessage::ApprovedConnection(backlog, link_set);
+                                        let msg = RouterProcessorMessage::ApprovedConnection(rel.clone(), backlog, link_set);
                                         sender.send(msg).await;
                                         permit.forget();
                                         return;
@@ -263,7 +263,7 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                     }
                 },
                 Ok(permit) = ui_permits.acquire(), if recvd_ui_sub && !ui_permits.is_closed() => {
-                    let msg = RouterProcessorMessage::ApprovedConnection(backlog, link_set);
+                    let msg = RouterProcessorMessage::ApprovedConnection(rel.clone(), backlog, link_set);
                     sender.send(msg).await;
                     permit.forget();
                     return;

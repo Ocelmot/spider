@@ -1,4 +1,4 @@
-use spider_link::{message::Message, Relation};
+use spider_link::{Relation, link_set::Epoch, message::Message};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{ClientChannel, SpiderClientBuilder};
@@ -6,14 +6,14 @@ use crate::{ClientChannel, SpiderClientBuilder};
 pub enum ClientControl {
     Pair(Relation),
     Connect,
-    Message(Message, Option<u64>),
+    Message(Message, Option<Epoch>),
     Disconnect,
     Unpair,
     Terminate,
 
     AddChannel(UnboundedSender<ClientResponse>),
-    SetOnMessage(Option<Box<dyn FnMut(&ClientChannel, Message, u64) + Send>>),
-    SetOnConnect(Option<Box<dyn FnMut(&ClientChannel, u64) + Send>>),
+    SetOnMessage(Option<Box<dyn FnMut(&ClientChannel, Message, Epoch) + Send>>),
+    SetOnConnect(Option<Box<dyn FnMut(&ClientChannel, Epoch) + Send>>),
     SetOnTerminate(Option<Box<dyn FnMut(SpiderClientBuilder) + Send>>),
 }
 
@@ -26,10 +26,10 @@ pub enum ClientResponse {
     Paired,
 
     /// The client has connected to the base it paired to.
-    Connected(u64),
+    Connected(Epoch),
 
     /// The client has received a message from the base.
-    Message(Message, u64),
+    Message(Message, Epoch),
     
     /// The connection between the client and the base has disconnected.
     /// 
