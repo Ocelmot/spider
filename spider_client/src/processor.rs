@@ -55,11 +55,14 @@ impl SpiderClientProcessor {
             (client_channel, Vec::new())
         };
 
+        let mut beacon = Beacon::new(Duration::from_secs(10));
+        beacon.set_port(state.beacon_port);
+
         let mut processor = Self {
             state_path,
             state,
             link_set: None,
-            beacon: Beacon::new(Duration::from_secs(10)),
+            beacon,
             client_channel: client_channel.clone(),
             receiver,
             on_message: None,
@@ -68,6 +71,7 @@ impl SpiderClientProcessor {
             on_terminate: None,
             channels,
         };
+        
 
         let handle = spawn(async move {
             processor

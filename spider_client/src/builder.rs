@@ -188,6 +188,11 @@ impl SpiderClientBuilder {
         self.state.beacon_enable = set;
     }
 
+    /// Returns the port the beacon will use when it tries to find the base
+    pub fn beacon_port(&self) -> u16 {
+        self.state.beacon_port
+    }
+
     // Veilid
     /// Enables the use of veilid to establish a connection. This provides the
     /// name of the client to veilid. It should be unique to the application

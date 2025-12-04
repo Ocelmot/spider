@@ -25,6 +25,9 @@ pub struct SpiderConfig {
     #[serde(default = "default_true")]
     enable_beacon: bool,
 
+    #[serde(default = "default_beacon_port")]
+    beacon_port: u16,
+
     // No peripheral configurations
     #[serde(default)]
     peripheral_path: Option<String>,
@@ -89,6 +92,10 @@ impl SpiderConfig {
     pub fn beacon_enabled(&self) -> bool {
         self.enable_beacon
     }
+
+    pub fn beacon_port(&self) -> u16 {
+        self.beacon_port
+    }
 }
 
 // Defaults
@@ -114,6 +121,10 @@ fn default_log_path() -> String {
 
 fn default_state_data_path() -> String {
     "state.dat".into()
+}
+
+fn default_beacon_port() -> u16 {
+    1930u16
 }
 
 fn default_veilid_enabled() -> bool {

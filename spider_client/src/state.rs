@@ -1,9 +1,9 @@
 use std::{num::NonZeroUsize, path::Path};
 
-use tokio::fs;
 use lru::LruCache;
 use serde::{ser::SerializeTuple, Deserialize, Deserializer, Serialize, Serializer};
 use spider_link::{Relation, Role, SelfRelation};
+use tokio::fs;
 
 use crate::error::{ClientResult, ErrorKind, ProblemWrap};
 
@@ -38,6 +38,8 @@ pub(crate) struct SpiderClientState {
     // Beacon
     #[serde(default = "bool_true")]
     pub beacon_enable: bool,
+    #[serde(default = "beacon_default_port")]
+    pub beacon_port: u16,
 
     // Veilid
     #[serde(default)]
@@ -74,6 +76,7 @@ impl SpiderClientState {
 
             // Beacon
             beacon_enable: true,
+            beacon_port: beacon_default_port(),
 
             // Veilid
             veilid_enable: None,
@@ -117,10 +120,6 @@ impl Default for SpiderClientState {
     }
 }
 
-fn bool_true() -> bool {
-    true
-}
-
 fn default_lru() -> LruCache<String, ()> {
     LruCache::new(NonZeroUsize::new(10).unwrap())
 }
@@ -144,7 +143,10 @@ where
     Ok(lru)
 }
 
-fn serialize_lru<S>(lru: &LruCache<String, ()>, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer{
+fn serialize_lru<S>(lru: &LruCache<String, ()>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
     let mut tup = serializer.serialize_tuple(2)?;
     tup.serialize_element(&lru.len())?;
     let mut vec = Vec::with_capacity(lru.len());
@@ -153,4 +155,12 @@ fn serialize_lru<S>(lru: &LruCache<String, ()>, serializer: S) -> Result<S::Ok, 
     }
     tup.serialize_element(&vec)?;
     tup.end()
+}
+
+fn bool_true() -> bool {
+    true
+}
+
+pub fn beacon_default_port() -> u16 {
+    1930u16
 }

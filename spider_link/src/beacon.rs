@@ -25,53 +25,6 @@ use tokio::{
 use tokio_stream::StreamMap;
 use tracing::{error, info, trace, warn};
 
-/// Broadcast a request over the local network for any base that is
-/// listening. The IP address of the first response received is returned.
-/// This function will timeout after 10 seconds.
-#[deprecated = "Use Beacon struct instead"]
-pub async fn beacon_lookout_one(limit: Duration) -> Option<String> {
-    let sockets = get_interface_sockets().await;
-    beacon_probe_send(&sockets).await;
-    let mut recv_stream = sockets_to_recv_stream(sockets);
-
-    let start = Instant::now();
-    let remaining = limit.saturating_sub(start.elapsed());
-    while remaining > Duration::ZERO {
-        if let Ok(Some(socket_addr)) = timeout(remaining, recv_stream.next()).await {
-            return Some(socket_addr.to_string());
-        } else {
-            break;
-        };
-    }
-    None
-}
-
-/// Broadcast a request over the local network for any base that is
-/// listening. Returns a Vec of the IP addresses of the responses
-/// received during the time limit.
-/// This function will timeout after the given Duration.
-#[deprecated = "Use Beacon struct instead"]
-pub async fn beacon_lookout_many(limit: Duration) -> Vec<String> {
-    let sockets = get_interface_sockets().await;
-    beacon_probe_send(&sockets).await;
-    let mut recv_stream = sockets_to_recv_stream(sockets);
-
-    let start = Instant::now();
-    let mut remaining = limit.saturating_sub(start.elapsed());
-    let mut addrs = Vec::new();
-    while remaining > Duration::ZERO {
-        if let Ok(Some(socket_addr)) = timeout(remaining, recv_stream.next()).await {
-            addrs.push(socket_addr.to_string());
-        } else {
-            break;
-        };
-
-        remaining = limit.saturating_sub(start.elapsed());
-    }
-
-    addrs
-}
-
 /// Get a list of UdpSockets connected to each interface, if the interface as a
 /// private or loopback address.
 async fn get_interface_sockets() -> Vec<UdpSocket> {
@@ -157,6 +110,7 @@ fn sockets_to_recv_stream(sockets: Vec<UdpSocket>) -> SelectAll<impl Stream<Item
 /// Beacon broadcasts a request for nearby bases to reply. This yields those
 /// replies in an asynchronous way.
 pub struct Beacon {
+    port: u16,
     listeners: StreamMap<IpAddr, Pin<Box<dyn Stream<Item = SocketAddr> + Send + Sync>>>,
     senders: HashMap<IpAddr, Arc<UdpSocket>>,
     interval: Interval,
@@ -169,10 +123,18 @@ impl Beacon {
         let mut interval = interval(period);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         Self {
+            port: 1930,
             listeners: StreamMap::new(),
             senders: HashMap::new(),
             interval,
         }
+    }
+
+    /// Sets the port the beacon will operate on. This is typically 1930. This
+    /// is the port the broadcast will be sent to. The broadcast will come from
+    /// the port below this one.
+    pub fn set_port(&mut self, port: u16) {
+        self.port = port;
     }
 
     /// Clears the sockets from the internal structures, allowing other systems
@@ -210,7 +172,7 @@ impl Beacon {
             }
 
             trace!("Beacon binding on {:?}", addr.ip());
-            let socket = match UdpSocket::bind((addr.ip(), 1929)).await {
+            let socket = match UdpSocket::bind((addr.ip(), self.port - 1)).await {
                 Ok(socket) => Arc::new(socket),
                 Err(e) => {
                     warn!("Cant bind to {}, due to error {}", addr.ip(), e);
@@ -257,7 +219,7 @@ impl Beacon {
                         }
 
                         let _ = socket
-                            .send_to(b"SPIDER_PROBE", "255.255.255.255:1930")
+                            .send_to(b"SPIDER_PROBE", ("255.255.255.255", self.port))
                             .await;
                     }
                 }
@@ -305,10 +267,24 @@ async fn beacon_response_recv(socket: &UdpSocket) -> Option<SocketAddr> {
 /// return value is the JoinHandle for the loop, which can be used to cancel the
 /// beacon handler.
 pub fn start_beacon_listen_handler(advert_port: u16) -> JoinHandle<()> {
+    start_beacon_listen_handler_on(advert_port, 1930u16)
+}
+
+/// Starts the beacon handler that will respond with the given port number. The
+/// typical value for the Spider application is 1930.
+///
+/// The beacon typically listens at 1930, but this allows an override to listen
+/// on any port.
+/// 
+/// The address portion of the beacon is pulled from the udp response. The
+/// return value is the JoinHandle for the loop, which can be used to cancel the
+/// beacon handler.
+pub fn start_beacon_listen_handler_on(advert_port: u16, listen_port: u16) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut buf = [0; 1024];
 
-        let socket = UdpSocket::bind("0.0.0.0:1930").await.unwrap();
+        info!("Beacon binding on port {}", listen_port);
+        let socket = UdpSocket::bind(("0.0.0.0", listen_port)).await.unwrap();
         loop {
             trace!("probe looping");
             let (size, from) = socket.recv_from(&mut buf).await.unwrap();

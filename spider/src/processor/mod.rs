@@ -1,7 +1,8 @@
 use std::io::Error;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::{path::Path, time::Duration};
 
-use spider_link::beacon::start_beacon_listen_handler;
+use spider_link::beacon:: start_beacon_listen_handler_on;
 use tracing::info;
 use spider_link::message::Message;
 use spider_link::Keyfile;
@@ -128,7 +129,9 @@ impl Processor {
         // start beacon
         if config.beacon_enabled() {
             info!("Starting beacon listener.");
-            start_beacon_listen_handler(1930);
+            let listen_addr: SocketAddrV4 = config.listen_addr.parse().expect("invalid beacon address");
+            let beacon_port = config.beacon_port();
+            start_beacon_listen_handler_on(listen_addr.port(), beacon_port);
         }else{
             info!("Beacon listener disabled.");
         }
