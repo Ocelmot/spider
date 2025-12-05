@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose, Engine};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{Relation, SelfRelation};
 
@@ -80,6 +80,8 @@ pub enum RouterMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryEntry {
     relation: Relation,
+    #[serde(default)]
+    addrs: HashSet<String>,
     properties: HashMap<String, String>,
 }
 
@@ -88,6 +90,7 @@ impl DirectoryEntry {
     pub fn new(rel: Relation) -> Self {
         Self {
             relation: rel,
+            addrs: HashSet::new(),
             properties: HashMap::new(),
         }
     }
@@ -95,6 +98,11 @@ impl DirectoryEntry {
     /// Get the [Relation] this DirectoryEntry describes.
     pub fn relation(&self) -> &Relation {
         &self.relation
+    }
+
+    /// A mutable reference to the addrs property of this entry.
+    pub fn addrs(&mut self) -> &mut HashSet<String> {
+        &mut self.addrs
     }
 
     /// Get the value of one of the properties in this DirectoryEntry.

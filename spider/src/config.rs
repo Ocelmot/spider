@@ -9,10 +9,20 @@ use serde::{Deserialize, Serialize};
 pub struct SpiderConfig {
     #[serde(default = "default_listen_addr")]
     pub listen_addr: String,
+
+
+
     #[serde(default = "default_pub_addr")]
     pub pub_addr: String,
+
+    /// A list of addresses to be sent to all connected members and in invites.
+    /// This could be appended with other addresses from other dynamic sources.
+    #[serde(default)]
+    pub static_addrs: Vec<String>,
+
     #[serde(default = "default_log_path")]
     pub log_path: String,
+
     #[serde(default = "default_state_data_path")]
     pub state_data_path: String,
 
@@ -40,9 +50,6 @@ pub struct SpiderConfig {
 
     #[serde(default)]
     group_path: Option<String>,
-
-    // Router configuration
-    veilid_enabled: Option<bool>,
 }
 
 impl SpiderConfig {
@@ -79,10 +86,6 @@ impl SpiderConfig {
     pub fn group_path(&self) -> PathBuf {
         let s = self.dataset_path.clone().unwrap_or(String::from("groups"));
         PathBuf::from(s)
-    }
-
-    pub fn veilid_enabled(&self) -> bool {
-        self.veilid_enabled.unwrap_or_else(default_veilid_enabled)
     }
 
     pub fn key_req_enabled(&self) -> bool {

@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 
 use phf::{phf_set, Set};
 use spider_link::{
-    
     message::{DirectoryEntry, Message, RouterMessage, UiInput},
     Relation,
 };
@@ -138,6 +137,28 @@ impl Directory {
 
         let entry = self.entries.get(rel)?;
         entry.get(key)
+    }
+
+    pub async fn modify_entry(&mut self, rel: &Relation, func: impl FnOnce(&mut DirectoryEntry)) {
+        if let Some(mut ident) = self.entries.get_mut(rel) {
+            func(&mut ident);
+
+            set_directory_entry_ui(&mut self.pl, &ident).await;
+            let msg = RouterMessage::AddIdentity(ident.clone());
+            self.message_subscribers(msg).await;
+        }
+    }
+
+    pub async fn modify_or_insert_entry(&mut self, rel: &Relation, func: impl FnOnce(&mut DirectoryEntry)) {
+        // If the identity does not exist, this adds it.
+        self.add_identity(rel).await;
+        if let Some(mut ident) = self.entries.get_mut(rel) {
+            func(&mut ident);
+
+            set_directory_entry_ui(&mut self.pl, &ident).await;
+            let msg = RouterMessage::AddIdentity(ident.clone());
+            self.message_subscribers(msg).await;
+        }
     }
 
     pub async fn set_system_property<S, T>(&mut self, rel: Relation, key: S, value: T)

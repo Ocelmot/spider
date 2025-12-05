@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use tracing::info;
+use tracing::{info, trace};
 use spider_link::{ Relation, SelfRelation, identified_link::IdentifiedLink, link_set::{LinkSet, LinkSetMessage, links::PinnedLink}, message::{Message, RouterMessage, UiMessage}};
 use tokio::{
     select, spawn,
@@ -50,8 +50,9 @@ impl PendingManager {
     }
 
     pub async fn add_approval_code(&mut self, code: String) {
+        trace!("Adding approval code {}", code);
         for (_, pending) in &self.pending_connections {
-            pending.send(PendingLinkControl::AddCode(code.clone()));
+            pending.send(PendingLinkControl::AddCode(code.clone())).await;
         }
 
         let timeout = Instant::now() + CODE_TIMEOUT;
@@ -60,7 +61,7 @@ impl PendingManager {
 
     pub async fn revoke_approval_code(&mut self, code: String) {
         for (_, pending) in &self.pending_connections {
-            pending.send(PendingLinkControl::RevokeCode(code.clone()));
+            pending.send(PendingLinkControl::RevokeCode(code.clone())).await;
         }
 
         self.approval_codes.remove(&code);
@@ -70,14 +71,18 @@ impl PendingManager {
         let link = link.into();
         let rel = link.other_relation().clone();
         if let Some(pending) = self.pending_connections.get(&rel) {
+            trace!("Pending link set existed, adding link");
             pending.send(PendingLinkControl::AddLink(link)).await;
         } else {
+            trace!("Creating new pending link set");
             let sender = self.sender.clone();
             let self_rel = self.pl.state().self_relation().await;
             let ui_permits = self.ui_permits.clone();
             let pending = create_pending_link(sender, self_rel, rel.clone(), ui_permits);
 
+            trace!("Approval codes has {} active codes", self.approval_codes.len());
             for (code, _) in &self.approval_codes {
+                trace!("Adding approval code {}", code );
                 pending.send(PendingLinkControl::AddCode(code.clone())).await;
             }
 
@@ -103,9 +108,14 @@ impl PendingManager {
         remove_pending_ui_setting(&self.pl, rel).await;
     }
 
+    pub(super) async fn remove_connection(&mut self, rel: &Relation){
+        self.pending_connections.remove(rel);
+        remove_pending_ui_setting(&self.pl, rel).await;
+    }
+
     pub fn upkeep(&mut self) {
         // Clean approval codes
-        self.approval_codes.retain(|_, v| v < &mut Instant::now());
+        self.approval_codes.retain(|_, timeout| timeout >= &mut Instant::now());
     }
 }
 
@@ -143,7 +153,7 @@ async fn add_pending_ui_setting(pl: &ProcessorLink, rel: &Relation) {
     pl.send_ui(msg).await;
 }
 
-async fn remove_pending_ui_setting(pl: &ProcessorLink, rel: &Relation) {
+pub async fn remove_pending_ui_setting(pl: &ProcessorLink, rel: &Relation) {
     let sig = rel.sig();
     let title = format!("{:?}: {}", rel.role, sig);
     let msg = UiProcessorMessage::RemoveSetting {
@@ -190,11 +200,16 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                         },
                         PendingLinkControl::Deny => break,
                         PendingLinkControl::AddCode(code) => {
+                            trace!("Pending link got new code: {}", code);
                             if let Some(recvd_code) = &recvd_code {
+                                trace!("Checking vs recvd_code");
                                 if code == *recvd_code {
+                                    trace!("Matched");
                                     let msg = RouterProcessorMessage::ApprovedConnection(rel.clone(), backlog, link_set);
                                     sender.send(msg).await;
                                     return; 
+                                }else{
+                                    trace!("didn't match");
                                 }
                             }
                             codes.insert(code);
@@ -203,6 +218,7 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                             codes.remove(&code);
                         }
                         PendingLinkControl::AddLink(link) => {
+                            trace!("Pending adding new link");
                             link_set.add_link(link).await;
                         },
                     }
@@ -218,18 +234,22 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                         },
                         LinkSetMessage::Connecting(_) => {} // Base's link sets do not have reconnecting enabled.
                         LinkSetMessage::Message(message, epoch) => {
-                            
+                            trace!("Pending link set got message");
                             // check messages for incoming approval codes
                             if let Message::Router(RouterMessage::ApprovalCode(new_code)) = &message {
+                                trace!("Pending link set got approval code {}, {} #codes in set", new_code, codes.len());
                                 if codes.contains(new_code) {
+                                    trace!("Matched code, sending ApprovedConnection");
                                     let msg = RouterProcessorMessage::ApprovedConnection(rel.clone(), backlog, link_set);
                                     sender.send(msg).await;
                                     return;
                                 }else{
+                                    trace!("Mismatched code");
                                     recvd_code = Some(new_code.clone());
                                     code_attempts += 1;
                                     // too many attempts, deny
                                     if code_attempts > 5 {
+                                        trace!("Too many mismatched attempts, canceling");
                                         break;
                                     }
                                 }

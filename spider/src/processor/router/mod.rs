@@ -6,7 +6,10 @@ use std::{
 use directory::Directory;
 use pending::PendingManager;
 use spider_link::{
-    Relation, identified_link::IdentifiedLink, link_set::{Epoch, LinkSet, LinkSetMessage, impls::TCPLink, links::PinnedLink}, message::{Invite, Message, RouterMessage}
+    identified_link::IdentifiedLink,
+    link_set::{impls::TCPLink, links::PinnedLink, Epoch, LinkSet, LinkSetMessage},
+    message::{Invite, Message, RouterMessage},
+    Relation,
 };
 use tokio::{
     select,
@@ -23,7 +26,10 @@ use rand::{
 };
 use tracing::trace;
 
-use crate::error::{ProblemWrap, SpiderError, SpiderResult};
+use crate::{
+    error::{ProblemWrap, SpiderError, SpiderResult},
+    processor::router::pending::remove_pending_ui_setting,
+};
 
 use super::{link::ProcessorLink, message::ProcessorMessage, ui::UiProcessorMessage};
 
@@ -215,58 +221,7 @@ impl RouterProcessorState {
                 let mut link_set = self.create_link_set(rel.clone()).await?;
                 link_set.add_link(link).await;
 
-                let mut recv = link_set
-                    .take_recv()
-                    .ok_or(SpiderError::new().msg("could not take recv from link"))?;
-                let task_channel = self.sender.clone();
-                let task_rel = rel.clone();
-                tokio::spawn(async move {
-                    loop {
-                        match recv.recv().await {
-                            Ok(msg) => match msg {
-                                LinkSetMessage::Disconnected => {
-                                    info!("link disconnected");
-                                    if task_channel
-                                        .send(RouterProcessorMessage::Disconnected(
-                                            task_rel.clone(),
-                                        ))
-                                        .await
-                                        .is_err()
-                                    {
-                                        break;
-                                    }
-                                }
-                                LinkSetMessage::Connecting(_) => {} // The base's link_sets do not have reconnect enabled
-                                LinkSetMessage::Message(message, _) => {
-                                    if task_channel
-                                        .send(RouterProcessorMessage::UnapprovedMessage(
-                                            task_rel.clone(),
-                                            message,
-                                        ))
-                                        .await
-                                        .is_err()
-                                    {
-                                        break;
-                                    }
-                                }
-                                LinkSetMessage::Connected(epoch) => {
-                                    info!("link connected with epoch {}", epoch);
-                                    if task_channel
-                                        .send(RouterProcessorMessage::Connected(
-                                            task_rel.clone(),
-                                            epoch,
-                                        ))
-                                        .await
-                                        .is_err()
-                                    {
-                                        break;
-                                    }
-                                }
-                            },
-                            Err(_) => break,
-                        }
-                    }
-                });
+                create_link_set_recv_task(rel.clone(), &mut link_set, self.sender.clone());
 
                 self.links.insert(rel, link_set);
 
@@ -292,7 +247,8 @@ impl RouterProcessorState {
                 self.pending.add_approval_code(code).await;
             }
             RouterProcessorMessage::ApprovedConnection(rel, backlog, link_set) => {
-                self.approved_connection_handler(rel, backlog, link_set).await;
+                self.approved_connection_handler(rel, backlog, link_set)
+                    .await;
             }
 
             RouterProcessorMessage::Connected(rel, epoch) => {
@@ -301,22 +257,14 @@ impl RouterProcessorState {
                     let name = self.pl.state().name().await.clone();
                     let msg = RouterMessage::SetIdentityProperty("name".into(), name);
                     let msg = Message::Router(msg);
-                    let _ = link.send(msg).await;
+                    let _ = link.send_with_epoch(msg, epoch).await;
 
-                    // Send our address to them
-                    // if self.pl.config().veilid_enabled() {
-                    //     let dht = self.pl.state().veilid_own_dht().await;
-                    //     if let Some(addr) = dht.deref() {
-                    //         let addr = addr.key().to_string();
-                    //         let msg = RouterMessage::Addrs(vec![addr]);
-                    //         let msg = Message::Router(msg);
-                    //         let _ = link.send(msg).await;
-                    //     }else{
-                    //         trace!("No veilid address stored");
-                    //     }
-                    // }else{
-                    //     trace!("Veilid not enabled");
-                    // }
+                    // Send our addrs to them
+                    let addrs = self.pl.config().static_addrs.clone();
+                    // TODO: Add addrs from dynamic sources here
+                    let msg = RouterMessage::Addrs(addrs);
+                    let msg = Message::Router(msg);
+                    let _ = link.send_with_epoch(msg, epoch).await;
                 }
             }
             RouterProcessorMessage::UnapprovedMessage(rel, msg) => {
@@ -419,11 +367,9 @@ impl RouterProcessorState {
             RouterMessage::Approved => {} // base sends this, not recv
             RouterMessage::Denied => {}   // base sends this, not recv
             RouterMessage::Addrs(addrs) => {
-                if let Ok(addrs) = serde_json::ser::to_string(&addrs) {
-                    self.directory
-                        .set_system_property(rel, "addrs", addrs)
-                        .await;
-                }
+                self.directory.modify_or_insert_entry(&rel, |entry| {
+                    entry.addrs().extend(addrs.into_iter());
+                });
             }
 
             // Event Messages
@@ -438,7 +384,7 @@ impl RouterProcessorState {
             }
             RouterMessage::Subscribe(name) => {
                 if rel.is_peer() {
-                    return; // dont allow subscriptions from peers (at least for now)
+                    return; // don't allow subscriptions from peers (at least for now)
                 }
                 let entry = self.event_subscribers.entry(name);
                 let subscriber_set = entry.or_default();
@@ -446,7 +392,7 @@ impl RouterProcessorState {
             }
             RouterMessage::Unsubscribe(name) => {
                 if rel.is_peer() {
-                    return; // dont allow subscriptions from peers (at least for now)
+                    return; // don't allow subscriptions from peers (at least for now)
                 }
                 match self.event_subscribers.get_mut(&name) {
                     Some(subscriber_set) => {
@@ -493,13 +439,8 @@ impl RouterProcessorState {
         mut link_set: LinkSet<Message>,
     ) {
         info!("Connection Approved");
-
-        // get receiver + relation from link
-        let mut rx = match link_set.take_recv() {
-            Some(rx) => rx,
-            None => return,
-        };
-        // let relation = link_set.other_relation().clone();
+        // remove the pending connection, and update the ui
+        self.pending.remove_connection(&relation).await;
 
         // Inform other side that the connection is approved.
         let msg = Message::Router(RouterMessage::Approved);
@@ -508,38 +449,26 @@ impl RouterProcessorState {
         // add link relation to directory
         self.directory.add_identity(&relation).await;
 
-        // add link to structures
-        self.links.insert(relation.clone(), link_set);
 
         // send backlogged messages
         for (msg, _epoch) in backlog {
-            if self.directory.approve_message(&relation, &msg) {
-                self.pl
-                    .send(ProcessorMessage::RemoteMessage(relation.clone(), msg))
-                    .await;
-            }
+            self.sender.send(RouterProcessorMessage::UnapprovedMessage(relation.clone(), msg)).await;
         }
 
-        // start link processor
-        let pl = self.pl.clone();
-        tokio::spawn(async move {
-            loop {
-                let Ok(msg) = rx.recv().await else { break };
+        create_link_set_recv_task(relation.clone(), &mut link_set, self.sender.clone());
 
-                match msg {
-                    LinkSetMessage::Disconnected => {}
-                    LinkSetMessage::Connected(_) => {}
-                    LinkSetMessage::Connecting(_) => {}
-                    LinkSetMessage::Message(message, _) => {
-                        let msg = ProcessorMessage::RemoteMessage(relation.clone(), message);
-                        if pl.send(msg).await.is_err() {
-                            // If processor has stopped, disconnect
-                            break;
-                        }
-                    }
-                }
-            }
-        });
+        // Send Name
+        let msg = RouterMessage::SetIdentityProperty("name".into(), self.pl.state().name().await.clone());
+        link_set.send(Message::Router(msg)).await;
+
+        // Send Addrs
+        let addrs = self.pl.config().static_addrs.clone();
+        // TODO: Add dynamic addrs here
+        let msg = RouterMessage::Addrs(addrs);
+        link_set.send(Message::Router(msg)).await;
+        
+        // add link to structures
+        self.links.insert(relation, link_set);
     }
 
     async fn send_msg(&mut self, rel: Relation, msg: Message) -> SpiderResult {
@@ -599,8 +528,13 @@ impl RouterProcessorState {
 
     /// handle request from peripheral to accept an invite (external message)
     async fn handle_invite(&mut self, invite: Invite) -> SpiderResult {
+        // TODO: Invites should be signed/verified since they allow external
+        // modification to the directory.
+
         if !self.links.contains_key(invite.rel()) {
-            let link_set = self.create_link_set(invite.rel().clone()).await?;
+            let mut link_set = self.create_link_set(invite.rel().clone()).await?;
+            create_link_set_recv_task(invite.rel().clone(), &mut link_set, self.sender.clone());
+
             self.links.insert(invite.rel().clone(), link_set);
         }
 
@@ -614,9 +548,31 @@ impl RouterProcessorState {
             link_set.add_addr(addr.clone()).await;
         }
 
+        // update the directory
+        self.directory
+            .modify_or_insert_entry(invite.rel(), |entry| {
+                for addr in invite.addrs() {
+                    entry.addrs().insert(addr.clone());
+                }
+            })
+            .await;
+
+        link_set.connect().await;
+
         // send approval code
         let msg = RouterMessage::ApprovalCode(invite.invite_code().clone());
         link_set.send(Message::Router(msg)).await;
+
+        // Send name
+        let msg = Message::Router(RouterMessage::SetIdentityProperty("name".into(), self.pl.state().name().await.clone()));
+        link_set.send(msg).await;
+
+        // Send addrs
+        let addrs = self.pl.config().static_addrs.clone();
+        // TODO: get dynamic addrs here
+        let msg = Message::Router(RouterMessage::Addrs(addrs));
+        link_set.send(msg).await;
+
         Ok(())
     }
 
@@ -625,10 +581,10 @@ impl RouterProcessorState {
         info!("Generating Invite...");
 
         let self_rel = self.pl.state().self_relation().await;
-        // could possibly also add tcp/ip addr here as well
-        // let veilid_addr = self.veilid.listen_dht().key().to_string();
-        // TODO: get addresses for invitation (maybe set up a way to choose which network the invitation is for (tcp, chord, etc...))
-        let addrs = vec![];
+
+        let addrs = self.pl.config().static_addrs.clone();
+        // TODO: Get and add addrs from other sources like chord/etc.
+
         let rng = thread_rng();
         let invite_code = rng
             .sample_iter(Alphanumeric)
@@ -710,22 +666,69 @@ impl RouterProcessorState {
             .add_connector(move |addr| {
                 let sr = self_rel.clone();
                 let r = rel.clone();
-                async { TCPLink::connect(sr, r, addr).await.map_err(|_| spider_link::link_set::LinkSetError::Closed) }
+                async {
+                    TCPLink::connect(sr, r, addr)
+                        .await
+                        .map_err(|_| spider_link::link_set::LinkSetError::Closed)
+                }
             })
             .await
             .wrap()?;
 
         // TODO: make the link capabilities variable
-
-        // add veilid link capability
-        // let connector = self.veilid.get_connector();
-        // link_set
-        //     .add_connector(move |_, rel, addr| {
-        //         let c = connector.clone();
-        //         async move { c.connect(rel, addr).await }
-        //     })
-        //     .await;
-
         Ok(link_set)
     }
+}
+
+fn create_link_set_recv_task(
+    rel: Relation,
+    link_set: &mut LinkSet<Message>,
+    sender: Sender<RouterProcessorMessage>,
+) -> SpiderResult {
+    let mut recv = link_set
+        .take_recv()
+        .ok_or(SpiderError::new().msg("could not take recv from link"))?;
+    tokio::spawn(async move {
+        loop {
+            match recv.recv().await {
+                Ok(msg) => match msg {
+                    LinkSetMessage::Disconnected => {
+                        info!("link disconnected");
+                        if sender
+                            .send(RouterProcessorMessage::Disconnected(rel.clone()))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    LinkSetMessage::Connecting(_) => {} // The base's link_sets do not have reconnect enabled
+                    LinkSetMessage::Message(message, _) => {
+                        if sender
+                            .send(RouterProcessorMessage::UnapprovedMessage(
+                                rel.clone(),
+                                message,
+                            ))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    LinkSetMessage::Connected(epoch) => {
+                        info!("link connected with epoch {}", epoch);
+                        if sender
+                            .send(RouterProcessorMessage::Connected(rel.clone(), epoch))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                },
+                Err(_) => break,
+            }
+        }
+    });
+    Ok(())
 }
