@@ -368,8 +368,10 @@ impl RouterProcessorState {
             RouterMessage::Denied => {}   // base sends this, not recv
             RouterMessage::Addrs(addrs) => {
                 self.directory.modify_or_insert_entry(&rel, |entry| {
-                    entry.addrs_mut().extend(addrs.into_iter());
-                });
+                    let mut new_set = HashSet::new();
+                    new_set.extend(addrs.into_iter());
+                    *entry.addrs_mut() = new_set;
+                }).await;
             }
 
             // Event Messages
