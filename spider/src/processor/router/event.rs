@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use tracing::info;
+use tracing::{info, trace};
 use spider_link::{Relation, message::{DatasetData, RouterMessage, Message}};
 
 use super::RouterProcessorState;
@@ -17,7 +17,7 @@ impl RouterProcessorState{
             if recipients.contains(&external){
                 continue; // this recipient already received message via subscription
             }
-            info!("Sending message to external...");
+            info!("Sending message to external with relation {:?}", external);
             let router_msg = RouterMessage::Event(name.clone(), from.clone(), data.clone());
             let msg = Message::Router(router_msg);
             self.send_msg(external, msg).await;
@@ -25,6 +25,7 @@ impl RouterProcessorState{
     }
 
     pub(crate) async fn handle_event(&mut self, name: String, from: Relation, data: DatasetData){
+        trace!("sending event to subscribers");
         // route event to subscribers
         self.event_to_subscribers(&name, &from, &data).await;
     }

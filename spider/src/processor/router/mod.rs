@@ -368,7 +368,7 @@ impl RouterProcessorState {
             RouterMessage::Denied => {}   // base sends this, not recv
             RouterMessage::Addrs(addrs) => {
                 self.directory.modify_or_insert_entry(&rel, |entry| {
-                    entry.addrs().extend(addrs.into_iter());
+                    entry.addrs_mut().extend(addrs.into_iter());
                 });
             }
 
@@ -449,16 +449,21 @@ impl RouterProcessorState {
         // add link relation to directory
         self.directory.add_identity(&relation).await;
 
-
         // send backlogged messages
         for (msg, _epoch) in backlog {
-            self.sender.send(RouterProcessorMessage::UnapprovedMessage(relation.clone(), msg)).await;
+            self.sender
+                .send(RouterProcessorMessage::UnapprovedMessage(
+                    relation.clone(),
+                    msg,
+                ))
+                .await;
         }
 
         create_link_set_recv_task(relation.clone(), &mut link_set, self.sender.clone());
 
         // Send Name
-        let msg = RouterMessage::SetIdentityProperty("name".into(), self.pl.state().name().await.clone());
+        let msg =
+            RouterMessage::SetIdentityProperty("name".into(), self.pl.state().name().await.clone());
         link_set.send(Message::Router(msg)).await;
 
         // Send Addrs
@@ -466,22 +471,28 @@ impl RouterProcessorState {
         // TODO: Add dynamic addrs here
         let msg = RouterMessage::Addrs(addrs);
         link_set.send(Message::Router(msg)).await;
-        
+
         // add link to structures
         self.links.insert(relation, link_set);
     }
 
     async fn send_msg(&mut self, rel: Relation, msg: Message) -> SpiderResult {
-        trace!("Sending message: {:?}", msg);
+        trace!("Sending message: {:?} to relation {:?}", msg, rel);
 
         if let Some(link_set) = self.links.get_mut(&rel) {
+            trace!("Found link set for {:?}", rel.sig());
             if link_set.send(msg).await.is_err() {
                 self.links.remove(&rel);
             }
         } else {
-            let link_set = self.create_link_set(rel.clone()).await?;
+            trace!("creating link set for {:?}", rel.sig());
+            let mut link_set = self.create_link_set(rel.clone()).await?;
 
+            create_link_set_recv_task(rel.clone(), &mut link_set, self.sender.clone());
+
+            trace!("sending data on link set for {:?}", rel.sig());
             link_set.send(msg).await.wrap()?;
+            trace!("saving link set for  {}", rel.sig());
             self.links.insert(rel, link_set);
         }
         Ok(())
@@ -552,7 +563,7 @@ impl RouterProcessorState {
         self.directory
             .modify_or_insert_entry(invite.rel(), |entry| {
                 for addr in invite.addrs() {
-                    entry.addrs().insert(addr.clone());
+                    entry.addrs_mut().insert(addr.clone());
                 }
             })
             .await;
@@ -564,7 +575,10 @@ impl RouterProcessorState {
         link_set.send(Message::Router(msg)).await;
 
         // Send name
-        let msg = Message::Router(RouterMessage::SetIdentityProperty("name".into(), self.pl.state().name().await.clone()));
+        let msg = Message::Router(RouterMessage::SetIdentityProperty(
+            "name".into(),
+            self.pl.state().name().await.clone(),
+        ));
         link_set.send(msg).await;
 
         // Send addrs
@@ -652,14 +666,21 @@ impl RouterProcessorState {
     async fn create_link_set(&self, rel: Relation) -> SpiderResult<LinkSet<Message>> {
         let self_rel = self.pl.state().self_relation().await;
         let link_set = LinkSet::new();
+        trace!("");
 
         // add known addrs
-        if let Some(addrs) = self.directory.get_system_property(&rel, "addrs") {
-            let addrs = serde_json::from_str(addrs).unwrap_or(Vec::new());
-            for addr in addrs {
-                link_set.add_addr(addr).await.wrap()?;
+        if let Some(entry) = self.directory.get_entry(&rel) {
+            for addr in entry.addrs().iter() {
+                link_set.add_addr(addr.clone()).await.wrap()?;
             }
-        };
+        }
+
+        // if let Some(addrs) = self.directory.get_system_property(&rel, "addrs") {
+        //     let addrs = serde_json::from_str(addrs).unwrap_or(Vec::new());
+        //     for addr in addrs {
+        //         link_set.add_addr(addr).await.wrap()?;
+        //     }
+        // };
 
         // add tcp link capability
         link_set

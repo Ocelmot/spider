@@ -16,7 +16,6 @@ use super::RouterProcessorMessage;
 static SYSTEM_PROPERTIES: Set<&'static str> = phf_set! {
     "nickname",
     "blocked",
-    "addrs",
 };
 
 static SELF_PROPERTIES: Set<&'static str> = phf_set! {
@@ -137,6 +136,10 @@ impl Directory {
 
         let entry = self.entries.get(rel)?;
         entry.get(key)
+    }
+
+    pub fn get_entry(&self, rel: &Relation) -> Option<&DirectoryEntry> {
+        self.entries.get(rel)
     }
 
     pub async fn modify_entry(&mut self, rel: &Relation, func: impl FnOnce(&mut DirectoryEntry)) {

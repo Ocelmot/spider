@@ -100,8 +100,13 @@ impl DirectoryEntry {
         &self.relation
     }
 
+    /// A reference to the addrs property of this entry.
+    pub fn addrs(&self) -> &HashSet<String> {
+        &self.addrs
+    }
+
     /// A mutable reference to the addrs property of this entry.
-    pub fn addrs(&mut self) -> &mut HashSet<String> {
+    pub fn addrs_mut(&mut self) -> &mut HashSet<String> {
         &mut self.addrs
     }
 
