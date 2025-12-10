@@ -1,6 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
+    collections::{HashMap, HashSet}, net::SocketAddr, sync::Arc
 };
 
 use directory::Directory;
@@ -19,12 +18,14 @@ use tokio::{
     },
     task::{JoinError, JoinHandle},
 };
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use rand::{
     distributions::Alphanumeric, rngs::StdRng, seq::SliceRandom, thread_rng, Rng, SeedableRng,
 };
 use tracing::trace;
+
+use network_interface::NetworkInterfaceConfig;
 
 use crate::{
     error::{ProblemWrap, SpiderError, SpiderResult},
@@ -260,8 +261,7 @@ impl RouterProcessorState {
                     let _ = link.send_with_epoch(msg, epoch).await;
 
                     // Send our addrs to them
-                    let addrs = self.pl.config().static_addrs.clone();
-                    // TODO: Add addrs from dynamic sources here
+                    let addrs = get_addrs(&self.pl).await;
                     let msg = RouterMessage::Addrs(addrs);
                     let msg = Message::Router(msg);
                     let _ = link.send_with_epoch(msg, epoch).await;
@@ -469,8 +469,7 @@ impl RouterProcessorState {
         link_set.send(Message::Router(msg)).await;
 
         // Send Addrs
-        let addrs = self.pl.config().static_addrs.clone();
-        // TODO: Add dynamic addrs here
+        let addrs = get_addrs(&self.pl).await;
         let msg = RouterMessage::Addrs(addrs);
         link_set.send(Message::Router(msg)).await;
 
@@ -584,8 +583,7 @@ impl RouterProcessorState {
         link_set.send(msg).await;
 
         // Send addrs
-        let addrs = self.pl.config().static_addrs.clone();
-        // TODO: get dynamic addrs here
+        let addrs = get_addrs(&self.pl).await;
         let msg = Message::Router(RouterMessage::Addrs(addrs));
         link_set.send(msg).await;
 
@@ -598,8 +596,7 @@ impl RouterProcessorState {
 
         let self_rel = self.pl.state().self_relation().await;
 
-        let addrs = self.pl.config().static_addrs.clone();
-        // TODO: Get and add addrs from other sources like chord/etc.
+        let addrs = get_addrs(&self.pl).await;
 
         let rng = thread_rng();
         let invite_code = rng
@@ -754,4 +751,31 @@ fn create_link_set_recv_task(
         }
     });
     Ok(())
+}
+
+async fn get_addrs(pl: &ProcessorLink) -> Vec<String> {
+    debug!("Getting addrs! ------------------ ");
+    let mut addrs = HashSet::new();
+    addrs.extend( pl.config().static_addrs.iter().cloned());
+
+    // Dynamic Addrs here
+    if pl.config().use_nic_addrs {
+        if let Ok(listen_addr) = pl.config().listen_addr.parse::<SocketAddr>() {
+            let interfaces = network_interface::NetworkInterface::show().unwrap_or(Vec::new());
+
+            let iface_addrs = interfaces
+                .iter()
+                .flat_map(|interface| interface.addr.iter());
+
+            for addr in iface_addrs {
+                let sock_addr = SocketAddr::new(addr.ip(), listen_addr.port());
+                debug!("Adding dynamic addr: {:?}", sock_addr);
+                addrs.insert(sock_addr.to_string());
+            }
+        }else{
+            warn!("Could not parse listen addr");
+        }
+    }
+
+    addrs.into_iter().collect()
 }

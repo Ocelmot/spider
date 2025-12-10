@@ -11,7 +11,7 @@ use tokio::{
     sync::mpsc::{channel, unbounded_channel, Receiver, UnboundedSender},
     task::JoinHandle,
 };
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
 
 use crate::{
     client_message::{ClientControl, ClientResponse},
@@ -112,7 +112,9 @@ impl SpiderClientProcessor {
                 async {
                 TCPLink::connect(inner_sr, inner_r, addr)
                     .await
-                    .map_err(|e| LinkSetError::Closed)
+                    .map_err(|e| {
+                        warn!("TCPLINK encountered error {}", e);
+                        LinkSetError::Closed})
             }})
             .await
             .wrap_msg("failed to add_connector")?;

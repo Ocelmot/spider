@@ -1755,6 +1755,7 @@ dependencies = [
  "console-subscriber",
  "dht_chord",
  "lru",
+ "network-interface",
  "num-bigint",
  "phf",
  "rand",

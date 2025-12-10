@@ -20,6 +20,9 @@ pub struct SpiderConfig {
     #[serde(default)]
     pub static_addrs: Vec<String>,
 
+    #[serde(default="default_false")]
+    pub use_nic_addrs: bool,
+
     #[serde(default = "default_log_path")]
     pub log_path: String,
 

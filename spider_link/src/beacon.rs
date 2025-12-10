@@ -171,11 +171,12 @@ impl Beacon {
                 }
             }
 
-            trace!("Beacon binding on {:?}", addr.ip());
-            let socket = match UdpSocket::bind((addr.ip(), self.port - 1)).await {
+            let port = self.port - 1;
+            trace!("Beacon binding on {:?}:{}", addr.ip(), port);
+            let socket = match UdpSocket::bind((addr.ip(), port)).await {
                 Ok(socket) => Arc::new(socket),
                 Err(e) => {
-                    warn!("Cant bind to {}, due to error {}", addr.ip(), e);
+                    warn!("Cant bind to {}:{}, due to error {}", addr.ip(), port, e);
                     continue;
                 }
             };
