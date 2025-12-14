@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet}, net::SocketAddr, sync::Arc
+    collections::{HashMap, HashSet}, net::SocketAddr, path::{Path, PathBuf}, sync::Arc
 };
 
 use directory::Directory;
@@ -11,12 +11,9 @@ use spider_link::{
     Relation,
 };
 use tokio::{
-    select,
-    sync::{
-        mpsc::{channel, error::SendError, Receiver, Sender},
-        Mutex,
-    },
-    task::{JoinError, JoinHandle},
+    fs::remove_file, select, sync::{
+        Mutex, mpsc::{Receiver, Sender, channel, error::SendError}
+    }, task::{JoinError, JoinHandle}
 };
 use tracing::{debug, info, warn};
 
@@ -102,8 +99,15 @@ impl RouterProcessorState {
         let directory = Directory::load_directory(pl.clone()).await;
         let pending = PendingManager::new(pl.clone(), sender.clone());
 
+        let permit_file_path = PathBuf::from("./permit_ui");
+        let permit_file = permit_file_path.exists();
+        let _ = remove_file(permit_file_path).await;
+
         if directory.is_empty() {
             info!("Directory empty, adding a UI Permit");
+            pending.add_ui_permit();
+        }else if permit_file {
+            info!("Directory not empty, but found permit file, adding a UI Permit");
             pending.add_ui_permit();
         }
 
