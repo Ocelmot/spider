@@ -2,9 +2,7 @@ use core::panic;
 use std::{path::PathBuf, time::Duration};
 
 use spider_link::{
-    beacon::Beacon,
-    link_set::{impls::TCPLink, Epoch, LinkSet, LinkSetError, LinkSetMessage},
-    message::{Message, RouterMessage},
+    Relation, beacon::Beacon, link_set::{Epoch, LinkSet, LinkSetError, LinkSetMessage, impls::TCPLink}, message::{Message, RouterMessage}
 };
 use tokio::{
     select, spawn,
@@ -139,70 +137,12 @@ impl SpiderClientProcessor {
             }
         }
 
-        // enable veilid capability
-        // if let Some(veilid_name) = &self.state.veilid_enable {
-        //     let config = get_veilid_config(&self.state, veilid_name.clone());
-
-        //     let mut reg_entry = RegistryEntry::get_or_create_entry(
-        //         self.state.self_relation.clone(),
-        //         self.state.veilid_own_dht.clone(),
-        //         config,
-        //     )
-        //     .await
-        //     .wrap_msg("Failed to get VeilidHub from registry")?;
-
-        //     if reg_entry.has_listener_callback().await {
-        //         return Err(ClientError::new().msg("A client with this SelfRelation is already connected to the Veilid system. Only one such client is allowed at a time."));
-        //     }
-
-        //     if self.state.veilid_own_dht.is_none() {
-        //         self.state.veilid_own_dht = Some(reg_entry.get_listen_dht().clone());
-        //         if let Some(state_path) = &self.state_path {
-        //             self.state
-        //                 .to_file(state_path)
-        //                 .await
-        //                 .wrap_msg("failed to save veilid dht")?;
-        //         }
-        //     }
-
-        //     let connector = reg_entry.get_connector();
-        //     link_set
-        //         .add_connector(move |_sr, r, addr| {
-        //             let fut_connector = connector.clone();
-        //             async move { fut_connector.connect(r, addr).await }
-        //         })
-        //         .await
-        //         .wrap_msg("failed to add veilid connector")?;
-
-        //     let listen_sender = link_set.clone_sender();
-        //     reg_entry
-        //         .set_listener_callback(move |link| {
-        //             let async_sender = listen_sender.clone_sender();
-        //             async move {
-        //                 let _ = async_sender.add_link(link).await;
-        //             }
-        //         })
-        //         .await;
-        // }
-
         self.link_set = Some(link_set);
         Ok(())
     }
 
     async fn dispose_link_set(&mut self, _link_set: LinkSet<Message>) -> ClientResult {
-        // if let Some(veilid_name) = &self.state.veilid_enable {
-        //     let config = get_veilid_config(&self.state, veilid_name.clone());
-
-        //     let mut reg_entry = RegistryEntry::get_or_create_entry(
-        //         self.state.self_relation.clone(),
-        //         self.state.veilid_own_dht.clone(),
-        //         config,
-        //     )
-        //     .await
-        //     .wrap_msg("Failed to get VeilidHub from registry")?;
-
-        //     reg_entry.clear_listener_callback().await;
-        // }
+        // Used to be used to close out Veilid connections
         Ok(())
     }
 
@@ -293,6 +233,29 @@ impl SpiderClientProcessor {
                                         trace!("Already had host relation");
                                     }
                                 },
+                                ClientControl::PairAddr(addr) => {
+                                    trace!("Pairing to device at {}", addr);
+                                    if self.state.host_relation.is_none() {
+                                        if let Some(key_req) = TCPLink::key_request(addr).await{
+                                            trace!("Got key request {:?}", key_req);
+                                            self.state.host_relation = Some(Relation::peer_from_id(key_req.key));
+                                            self.init_link_set().await.wrap_msg("Failed to initialize link set")?;
+                                            // add addr to link set to attempt the connection
+                                            if let Some(link_set) = self.link_set.as_ref() {
+                                                trace!("Adding addr to link_set {}", addr);
+                                                let _ = link_set.add_addr(addr.to_string()).await;
+                                            }else{
+                                                // This condition indicates that
+                                                // the client could pair but not
+                                                // establish a connection for
+                                                // whatever reason.
+                                            }
+                                            let _ = self.save_state().await;
+                                            self.process_client_response(ClientResponse::Paired).await;
+                                        }
+                                        
+                                    }
+                                }
                                 ClientControl::Connect => {
                                     // trying to connect an unpaired client does
                                     // nothing
@@ -423,37 +386,3 @@ async fn opt_link_set_recv(
         None => std::future::pending().await,
     }
 }
-
-// fn get_veilid_config(state: &SpiderClientState, program_name: String) -> VeilidConfigInner {
-//     let config_root = state
-//         .veilid_root
-//         .as_ref()
-//         .map(|path| PathBuf::from(path))
-//         .unwrap_or_else(|| PathBuf::from("./.veilid"));
-
-//     VeilidConfigInner {
-//         program_name,
-//         protected_store: veilid_core::VeilidConfigProtectedStore {
-//             directory: {
-//                 let path = config_root.join("protected_store");
-//                 path.to_str().unwrap().to_string()
-//             },
-//             ..Default::default()
-//         },
-//         block_store: veilid_core::VeilidConfigBlockStore {
-//             directory: {
-//                 let path = config_root.join("block_store");
-//                 path.to_str().unwrap().to_string()
-//             },
-//             ..Default::default()
-//         },
-//         table_store: veilid_core::VeilidConfigTableStore {
-//             directory: {
-//                 let path = config_root.join("block_store");
-//                 path.to_str().unwrap().to_string()
-//             },
-//             ..Default::default()
-//         },
-//         ..Default::default()
-//     }
-// }

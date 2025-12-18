@@ -202,6 +202,7 @@ impl Beacon {
         loop {
             trace!("listeners count: {}", self.listeners.len());
             select! {
+                biased;
                 Some((_, sock_addr)) = self.listeners.next(), if !self.listeners.is_empty() => {
                     return sock_addr;
                 }
@@ -276,7 +277,7 @@ pub fn start_beacon_listen_handler(advert_port: u16) -> JoinHandle<()> {
 ///
 /// The beacon typically listens at 1930, but this allows an override to listen
 /// on any port.
-/// 
+///
 /// The address portion of the beacon is pulled from the udp response. The
 /// return value is the JoinHandle for the loop, which can be used to cancel the
 /// beacon handler.

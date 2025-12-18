@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::net::SocketAddr;
 
 use spider_link::Relation;
 use spider_link::link_set::Epoch;
@@ -53,6 +54,19 @@ impl ClientChannel {
     /// relation this client is paired to, unpair before calling this function.
     pub async fn pair(&self, rel: Relation) ->  ClientResult {
         match self.sender.send(ClientControl::Pair(rel)).await {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                Err(ClientError::new().problem(ErrorKind::Closed))
+            },
+        }
+    }
+
+    /// Instruct this client to pair with whatever device is at the addr.
+    /// 
+    /// If the client is already paired this will have no effect. To change what
+    ///  the client is paired to, unpair before calling this function.
+    pub async fn try_pair_addr(&self, addr: SocketAddr) ->  ClientResult {
+        match self.sender.send(ClientControl::PairAddr(addr)).await {
             Ok(_) => Ok(()),
             Err(_) => {
                 Err(ClientError::new().problem(ErrorKind::Closed))

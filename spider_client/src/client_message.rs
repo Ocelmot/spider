@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use spider_link::{Relation, link_set::Epoch, message::Message};
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -5,6 +7,7 @@ use crate::{ClientChannel, SpiderClientBuilder};
 
 pub enum ClientControl {
     Pair(Relation),
+    PairAddr(SocketAddr),
     Connect,
     Message(Message, Option<Epoch>),
     Disconnect,
