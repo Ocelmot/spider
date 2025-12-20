@@ -772,7 +772,25 @@ async fn get_addrs(pl: &ProcessorLink) -> Vec<String> {
                 .flat_map(|interface| interface.addr.iter());
 
             for addr in iface_addrs {
-                let sock_addr = SocketAddr::new(addr.ip(), listen_addr.port());
+                let ip = addr.ip();
+
+                // Skip non-routable addresses
+                if ip.is_loopback() {
+                    debug!("Skipping loopback addr: {:?}", ip);
+                    continue;
+                }
+
+                // Skip link-local addresses (169.254.x.x for IPv4, fe80:: for IPv6)
+                let is_link_local = match ip {
+                    std::net::IpAddr::V4(v4) => v4.is_link_local(),
+                    std::net::IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) == 0xfe80,
+                };
+                if is_link_local {
+                    debug!("Skipping link-local addr: {:?}", ip);
+                    continue;
+                }
+
+                let sock_addr = SocketAddr::new(ip, listen_addr.port());
                 debug!("Adding dynamic addr: {:?}", sock_addr);
                 addrs.insert(sock_addr.to_string());
             }

@@ -286,6 +286,9 @@ impl SpiderClientProcessor {
                                             connected = false;
                                             self.beacon.clear_sockets();
                                         }
+                                        // Clear cached base addresses to prevent stale addresses
+                                        // from being used when re-pairing
+                                        self.state.base_addrs.clear();
                                         let _ = self.save_state().await;
                                         self.process_client_response(ClientResponse::Unpaired(old_relation)).await;
                                     }
