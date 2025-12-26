@@ -45,17 +45,14 @@ impl UiPath {
 }
 
 impl PartialOrd for UiPath {
+    /// Parents must be processed before their children to make sure that all
+    /// the children are added correctly. Earlier children come before later
+    /// ones.
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         let comparison = match self.path.len().cmp(&other.path.len()) {
             std::cmp::Ordering::Less => std::cmp::Ordering::Less,
             std::cmp::Ordering::Equal => {
-                match self.path.last() {
-                    Some(self_last_index) => {
-                        let other_last_index = other.path.last().unwrap();
-                        self_last_index.cmp(other_last_index)
-                    },
-                    None => std::cmp::Ordering::Equal,
-                }
+                self.path.cmp(&other.path)
             },
             std::cmp::Ordering::Greater => std::cmp::Ordering::Greater,
         };

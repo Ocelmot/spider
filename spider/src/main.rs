@@ -130,7 +130,8 @@ fn load_config() -> SpiderConfig {
     let mut args = env::args().skip(1);
     let path_str = args.next().unwrap_or("spider_config.json".to_string());
     let config_path = Path::new(&path_str);
-    println!("Loading config file from {:?}", config_path.canonicalize());
+    println!("Current working directory: {:?}", std::env::current_dir());
+    println!("Loading config file from path: {:?}", config_path);
     let config = SpiderConfig::from_file(&config_path);
     config
 }
