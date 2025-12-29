@@ -2,7 +2,7 @@ use std::{
     collections::VecDeque,
     io::{Read, Write},
     mem,
-    sync::Arc,
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
 };
 
 use crate::{
@@ -42,7 +42,7 @@ pub struct TCPLink {
     socket_writer: OwnedWriteHalf,
     read_len: Option<u32>,
     read_buffer: VecDeque<u8>,
-    is_closed: bool,
+    is_closed: Arc<AtomicBool>,
 }
 
 impl TCPLink {
@@ -142,7 +142,7 @@ impl TCPLink {
                         socket_writer,
                         read_len,
                         read_buffer,
-                        is_closed: false,
+                        is_closed: Arc::new(AtomicBool::new(false)),
                     };
 
                     // emit Link on channel,
@@ -239,7 +239,7 @@ impl TCPLink {
             read_len,
             read_buffer,
 
-            is_closed: false,
+            is_closed: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -478,13 +478,22 @@ impl Link for TCPLink {
         let bytes = msg.serialize();
         self.write_chunk(&bytes)
             .await
-            .map_err(|_| LinkImplError::Closed)
+            .map_err(|_| {
+                self.is_closed.store(true, Ordering::SeqCst);
+                LinkImplError::Closed
+            })
     }
 
     async fn recv(&mut self) -> Result<LinkProtocol, impl std::error::Error + Send + Sync + 'static> {
-        let data = self.read_chunk().await.map_err(|_| LinkImplError::Closed)?;
+        let data = self.read_chunk().await.map_err(|_| {
+            self.is_closed.store(true, Ordering::SeqCst);
+            LinkImplError::Closed
+        })?;
         let mut data = VecDeque::from(data);
-        let ret = LinkProtocol::deserialize(&mut data).map_err(|_| LinkImplError::Deserialize);
+        let ret = LinkProtocol::deserialize(&mut data).map_err(|_| {
+            self.is_closed.store(true, Ordering::SeqCst);
+            LinkImplError::Deserialize
+        });
         debug!("Receiving msg: {:?}", ret);
         ret
     }
@@ -500,6 +509,7 @@ impl Link for TCPLink {
         let mut other_nonce = self.other_nonce.clone();
         let mut read_len = self.read_len.take();
         let mut read_buffer = mem::take(&mut self.read_buffer);
+        let is_closed = self.is_closed.clone();
         let (tx, rx) = channel(10);
         tokio::task::spawn(async move {
             loop {
@@ -511,12 +521,21 @@ impl Link for TCPLink {
                     &mut read_buffer,
                 )
                 .await;
-                let chunk = chunk.map_err(|_| LinkImplError::Closed)?;
+                let chunk = chunk.map_err(|_| {
+                    is_closed.store(true, Ordering::SeqCst);
+                    LinkImplError::Closed
+                })?;
                 let mut chunk = VecDeque::from(chunk);
                 let x =
-                    LinkProtocol::deserialize(&mut chunk).map_err(|_| LinkImplError::Deserialize);
+                    LinkProtocol::deserialize(&mut chunk).map_err(|_| {
+                        is_closed.store(true, Ordering::SeqCst);
+                        LinkImplError::Deserialize
+                    });
                 debug!("Receiving msg (taken reader): {:?}", x);
-                tx.send(x?).await.map_err(|_| LinkImplError::Closed)?;
+                tx.send(x?).await.map_err(|_| {
+                    is_closed.store(true, Ordering::SeqCst);
+                    LinkImplError::Closed
+                })?;
             }
             #[allow(unreachable_code)]
             Ok::<(), LinkImplError>(())
@@ -534,7 +553,7 @@ impl Link for TCPLink {
     }
 
     fn is_closed(&mut self) -> bool {
-        self.is_closed
+        self.is_closed.load(Ordering::SeqCst)
     }
 }
 
