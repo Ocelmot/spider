@@ -2,7 +2,10 @@ use core::panic;
 use std::{path::PathBuf, time::Duration};
 
 use spider_link::{
-    Relation, beacon::Beacon, link_set::{Epoch, LinkSet, LinkSetError, LinkSetMessage, impls::TCPLink}, message::{Message, RouterMessage}
+    beacon::Beacon,
+    link_set::{impls::TCPLink, Epoch, LinkSet, LinkSetError, LinkSetMessage},
+    message::{Message, RouterMessage},
+    Relation,
 };
 use tokio::{
     select, spawn,
@@ -15,8 +18,7 @@ use crate::{
     client_message::{ClientControl, ClientResponse},
     error::{ClientError, ClientResult, ErrorKind, Problem, ProblemWrap},
     state::SpiderClientState,
-    ClientChannel,
-    SpiderClientBuilder,
+    ClientChannel, SpiderClientBuilder,
 };
 
 pub(crate) struct SpiderClientProcessor {
@@ -69,7 +71,6 @@ impl SpiderClientProcessor {
             on_terminate: None,
             channels,
         };
-        
 
         let handle = spawn(async move {
             processor
@@ -88,14 +89,22 @@ impl SpiderClientProcessor {
 
         let link_set = LinkSet::new();
 
+        // The client will try to connect indefinitely
+        link_set
+            .set_connection_timeout(None)
+            .await
+            .wrap_msg("Failed to set connection timeout")?;
+
         // enable reconnect capability
         if self.state.auto_reconnect {
             link_set
                 .set_auto_connect(true)
                 .await
                 .wrap_msg("failed to set reconnect")?;
+            // reconnect timeout is low because the base does not attempt a
+            // connection to a peripheral
             link_set
-                .set_reconnection_timeout(Some(Duration::from_secs(5)))
+                .set_reconnection_timeout(Some(Duration::from_millis(1200)))
                 .await
                 .wrap_msg("failed to set allow_reconnect")?;
         }
@@ -104,16 +113,18 @@ impl SpiderClientProcessor {
         let sr = self.state.self_relation.clone();
         let r = host_relation.clone();
         link_set
-            .add_connector( move |addr| {
+            .add_connector(move |addr| {
                 let inner_sr = sr.clone();
                 let inner_r = r.clone();
                 async {
-                TCPLink::connect(inner_sr, inner_r, addr)
-                    .await
-                    .map_err(|e| {
-                        warn!("TCPLINK encountered error {}", e);
-                        LinkSetError::Closed})
-            }})
+                    TCPLink::connect(inner_sr, inner_r, addr)
+                        .await
+                        .map_err(|e| {
+                            warn!("TCPLINK encountered error {}", e);
+                            LinkSetError::Closed
+                        })
+                }
+            })
             .await
             .wrap_msg("failed to add_connector")?;
 
@@ -175,7 +186,7 @@ impl SpiderClientProcessor {
                             connected = true;
                             self.process_client_response(ClientResponse::Connected(epoch)).await;
                         },
-                        LinkSetMessage::Connecting(re_con) => {
+                        LinkSetMessage::AttemptingConnection(re_con) => {
                             reconnecting = re_con;
                         }
                         LinkSetMessage::Message(message, epoch) => {
@@ -253,7 +264,7 @@ impl SpiderClientProcessor {
                                             let _ = self.save_state().await;
                                             self.process_client_response(ClientResponse::Paired).await;
                                         }
-                                        
+
                                     }
                                 }
                                 ClientControl::Connect => {
@@ -320,7 +331,7 @@ impl SpiderClientProcessor {
                         },
                     }
                 },
-                addr = self.beacon.next_addr(), if (!connected || reconnecting) && self.link_set.is_some() && self.state.beacon_enable => {
+                addr = self.beacon.next_addr(), if reconnecting && self.link_set.is_some() && self.state.beacon_enable => {
                     info!("Client received addr: {:?}", addr);
                     // can only add addrs when the link is paired
                     if let Some(link_set) = &self.link_set{

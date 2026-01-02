@@ -726,7 +726,7 @@ fn create_link_set_recv_task(
                             break;
                         }
                     }
-                    LinkSetMessage::Connecting(_) => {} // The base's link_sets do not have reconnect enabled
+                    LinkSetMessage::AttemptingConnection(_) => {} // The base's link_sets do not have a mechanism to acquire more addresses
                     LinkSetMessage::Message(message, _) => {
                         if sender
                             .send(RouterProcessorMessage::UnapprovedMessage(

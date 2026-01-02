@@ -232,7 +232,7 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                         LinkSetMessage::Connected(_) => {
                             link_set.send(Message::Router(RouterMessage::Pending)).await;
                         },
-                        LinkSetMessage::Connecting(_) => {} // Base's link sets do not have reconnecting enabled.
+                        LinkSetMessage::AttemptingConnection(_) => {} // Base's link sets do not have a way to acquire more addresses.
                         LinkSetMessage::Message(message, epoch) => {
                             trace!("Pending link set got message");
                             // check messages for incoming approval codes
