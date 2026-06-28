@@ -8,11 +8,7 @@ use crate::{
 };
 use base64::{engine::general_purpose, Engine};
 use rsa::{
-    pkcs1v15::{DecryptingKey, EncryptingKey, Signature, SigningKey, VerifyingKey},
-    pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey},
-    signature::{SignatureEncoding, Signer, Verifier},
-    traits::{RandomizedDecryptor, RandomizedEncryptor},
-    RsaPrivateKey,
+    RsaPrivateKey, pkcs1v15::{DecryptingKey, EncryptingKey, Signature, SigningKey, VerifyingKey}, pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey}, signature::{DigestSigner, DigestVerifier, SignatureEncoding, Signer, Verifier}, traits::{RandomizedDecryptor, RandomizedEncryptor}
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -111,7 +107,7 @@ impl Relation {
     }
 
     /// Optionally returns a Relation from a decoded base64 string
-    pub fn from_base64(s: &String) -> Option<Self> {
+    pub fn from_base64<T: AsRef<[u8]>>(s: T) -> Option<Self> {
         match general_purpose::URL_SAFE_NO_PAD.decode(s) {
             Ok(mut v) => {
                 let role = match v.pop()? {
@@ -189,6 +185,16 @@ impl Relation {
         }
     }
 
+    /// Use the public key in this relation to verify some data against a signature.
+    pub fn verify_digest(&self, digest: Sha256, sig: &[u8]) -> bool {
+        let key = self.id.as_pub_key().unwrap();
+        let verifying_key = VerifyingKey::<Sha256>::new(key);
+        match Signature::try_from(sig) {
+            Ok(sig) => verifying_key.verify_digest(digest, &sig).is_ok(),
+            Err(_) => false,
+        }
+    }
+
     /// Serialize this Relation
     pub fn serialize(&self) -> Vec<u8> {
         let mut data = Vec::new();
@@ -200,12 +206,12 @@ impl Relation {
     /// Deserialize this Relation
     pub fn deserialize(data: &mut VecDeque<u8>) -> LinkResult<Self> {
         // Deserialize role
-        let role = data.pop_front().wrap()?;
+        let role = data.pop_front().wrap_problem_msg(ErrorKind::Deserialization, "Failed to deserialize Role")?;
         let role = Role::deserialize(role)?;
 
         // Deserialize key
         let mut bytes = [0u8; 294];
-        data.read_exact(&mut bytes).wrap()?;
+        data.read_exact(&mut bytes).wrap_problem_msg(ErrorKind::Deserialization, "Failed to deserialize key")?;
         let id = SpiderId::from_bytes(bytes);
         Ok(Relation { role, id })
     }
@@ -272,6 +278,15 @@ impl SelfRelation {
         let key = self.private_key();
         let signing_key = SigningKey::<Sha256>::new(key);
         let sig = signing_key.sign(data).to_bytes();
+        sig.as_ref().try_into().unwrap()
+    }
+
+    /// Sign a [Sha256] digest using the private key within this SelfRelation.
+    /// Returns the signature in byte form.
+    pub fn sign_digest(&self, digest: Sha256) -> RelSig {
+        let key = self.private_key();
+        let signing_key = SigningKey::<Sha256>::new(key);
+        let sig = signing_key.sign_digest(digest).to_bytes();
         sig.as_ref().try_into().unwrap()
     }
 

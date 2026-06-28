@@ -114,6 +114,13 @@ pub enum ErrorKind {
     Taken,
     /// Authentication failure
     Authentication,
+
+    /// Time limit elapsed
+    Timeout,
+
+    /// No such transport. It may be gated behind a feature flag
+    UnknownTransport,
+
     /// Other problems
     Misc,
 }
@@ -123,7 +130,7 @@ pub enum ErrorKind {
 pub struct LinkError {
     kind: ErrorKind,
     msg: Option<String>,
-    source: Option<Box<(dyn Error + Send + Sync + 'static)>>,
+    source: Option<Box<dyn Error + Send + Sync + 'static>>,
 }
 
 impl LinkError {
@@ -135,6 +142,11 @@ impl LinkError {
             msg: None,
             source: None,
         }
+    }
+
+    /// Returns the [ErrorKind] of the topmost error
+    pub fn kind(&self) -> &ErrorKind {
+        &self.kind
     }
 
     /// Indicate the [ErrorKind] of problem that occurred,

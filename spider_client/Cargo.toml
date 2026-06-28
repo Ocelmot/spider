@@ -5,8 +5,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+
+
 [dependencies]
-spider_link = { git = "https://github.com/Ocelmot/spider" }
+spider_link = { git = "https://github.com/Ocelmot/spider", features = ["cs_0_x25519_chacha20", "transport_tcp"]}
+
 
 tokio = { version = "1", features = ["full"] }
 tracing = {version = "0.1", features = ["log"]}

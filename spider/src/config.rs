@@ -4,6 +4,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use spider_link::link_set::links::Address;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SpiderConfig {
@@ -18,7 +19,7 @@ pub struct SpiderConfig {
     /// A list of addresses to be sent to all connected members and in invites.
     /// This could be appended with other addresses from other dynamic sources.
     #[serde(default)]
-    pub static_addrs: Vec<String>,
+    pub static_addrs: Vec<Address>,
 
     #[serde(default="default_false")]
     pub use_nic_addrs: bool,

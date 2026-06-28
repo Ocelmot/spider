@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose, Engine};
+use link_set::links::Address;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -35,7 +36,7 @@ pub enum RouterMessage {
     Denied,
 
     /// A list of addresses that could be used to connect to this node
-    Addrs(Vec<String>),
+    Addrs(Vec<Address>),
 
     // Event messages
     /// Send a message with a type, a set of recipients, and some data.
@@ -81,7 +82,7 @@ pub enum RouterMessage {
 pub struct DirectoryEntry {
     relation: Relation,
     #[serde(default)]
-    addrs: HashSet<String>,
+    addrs: HashSet<Address>,
     properties: HashMap<String, String>,
 }
 
@@ -101,12 +102,12 @@ impl DirectoryEntry {
     }
 
     /// A reference to the addrs property of this entry.
-    pub fn addrs(&self) -> &HashSet<String> {
+    pub fn addrs(&self) -> &HashSet<Address> {
         &self.addrs
     }
 
     /// A mutable reference to the addrs property of this entry.
-    pub fn addrs_mut(&mut self) -> &mut HashSet<String> {
+    pub fn addrs_mut(&mut self) -> &mut HashSet<Address> {
         &mut self.addrs
     }
 
@@ -125,13 +126,13 @@ impl DirectoryEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Invite {
     rel: Relation,
-    addrs: Vec<String>,
+    addrs: Vec<Address>,
     invite_code: String,
 }
 
 impl Invite {
     /// Create a new Invite to establish a connection to this node.
-    pub fn new(self_rel: &SelfRelation, addrs: Vec<String>, invite_code: String) -> Self {
+    pub fn new(self_rel: &SelfRelation, addrs: Vec<Address>, invite_code: String) -> Self {
         Self {
             rel: self_rel.relation.clone(),
             addrs,
@@ -145,7 +146,7 @@ impl Invite {
     }
 
     /// Get a reference to this Invite's list of addresses
-    pub fn addrs(&self) -> &Vec<String> {
+    pub fn addrs(&self) -> &Vec<Address> {
         &self.addrs
     }
 

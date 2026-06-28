@@ -2,7 +2,7 @@ use std::{
     fs, num::NonZeroUsize, path::{Path, PathBuf}
 };
 
-use spider_link::{Keyfile, Relation, Role, SelfRelation};
+use spider_link::{Keyfile, Relation, Role, SelfRelation, link_set::links::Address};
 
 use crate::{
     error::{ClientResult, ErrorKind, ProblemWrap},
@@ -11,9 +11,8 @@ use crate::{
     ClientChannel,
 };
 
-/// SpiderClientBuilder contains a set of settings that can be loaded
-/// from a file, modified, saved back to a file, or used to connect
-/// to a Spider base.
+/// SpiderClientBuilder contains settings that can be loaded from a file,
+/// modified, saved back to a file, or used to connect to a Spider base.
 #[derive(Debug, Clone)]
 pub struct SpiderClientBuilder {
     state_path: Option<PathBuf>,
@@ -45,7 +44,8 @@ impl SpiderClientBuilder {
         }
     }
 
-    /// Use the given path as the path for this builder, and load the state from that file.
+    /// Use the given path as the path for this builder, and load the state from
+    /// that file.
     pub async fn load<P>(path: P) -> ClientResult<Self>
     where
         P: Into<PathBuf>,
@@ -58,9 +58,10 @@ impl SpiderClientBuilder {
         })
     }
 
-    /// Use the given path as the path for this builder, and load the state from that file
-    /// if it exists. If the file does not exist, create a default builder and pass it to the
-    /// callback to set the initial state. The state will be saved afterward.
+    /// Use the given path as the path for this builder, and load the state from
+    /// that file if it exists. If the file does not exist, create a default
+    /// builder and pass it to the callback to set the initial state. The state
+    /// will be saved afterward.
     pub async fn load_or_set<F>(path: &Path, func: F) -> ClientResult<Self>
     where
         F: FnOnce(&mut SpiderClientBuilder),
@@ -147,6 +148,16 @@ impl SpiderClientBuilder {
         self.state.auto_reconnect = auto_reconnect;
     }
 
+    /// Enable a transport method for this client
+    pub fn enable_transport(&mut self, scheme: String) {
+        self.state.transports.insert(scheme);
+    }
+
+    /// Disable a transport method for this client
+    pub fn disable_transport(&mut self, scheme: &String) {
+        self.state.transports.remove(scheme);
+    }
+
     // Base Addrs
     /// Set whether the client should use addresses provided by the base when
     /// establishing a connection
@@ -169,7 +180,7 @@ impl SpiderClientBuilder {
 
     /// Manually insert an address into the LRU set of addresses used when
     /// establishing a connection. This may evict another address.
-    pub fn add_base_addr(&mut self, addr: String) {
+    pub fn add_base_addr(&mut self, addr: Address) {
         self.state.base_addrs.push(addr, ());
     }
 
@@ -236,12 +247,12 @@ impl SpiderClientBuilder {
     }
 
     /// Add an address to the list of fixed addresses to try when connection.
-    pub fn add_fixed_addr(&mut self, addr: String) {
+    pub fn add_fixed_addr(&mut self, addr: Address) {
         self.state.fixed_addrs.push(addr);
     }
 
     /// Set the list of fixed addresses
-    pub fn set_fixed_addrs(&mut self, addrs: Vec<String>) {
+    pub fn set_fixed_addrs(&mut self, addrs: Vec<Address>) {
         self.state.fixed_addrs = addrs;
     }
 

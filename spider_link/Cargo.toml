@@ -5,8 +5,15 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+cs_0_x25519_chacha20 = ["dep:x25519-dalek", "dep:hkdf"]
+
+transport_tcp = []
+
+
+
 [dependencies]
-link_set = { git = "https://github.com/Ocelmot/link_set", features = ["serde"] }
+link_set = { git = "https://github.com/Ocelmot/link_set", features = ["serde", "tcp_link"] }
 
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.16"
@@ -18,6 +25,8 @@ serde_json = "1.0.73"
 serde_cbor = "0.11.2"
 zstd = "0.13.2"
 flate2 = "1.0.35"
+
+
 
 base64 = "0.21.0"
 sha256 = "1.1.3"
@@ -32,6 +41,15 @@ uuid = { version = "1.8.0", features = ["v4", "serde"] }
 bimap = "0.6.3"
 network-interface = "2.0.0"
 futures = "0.3.31"
+auto-const-array = "0.2.2"
+
+
+# crypto schemes
+# cs_0_x25519_chacha20
+x25519-dalek = {"version" = "2.0.1", features = ["static_secrets"], optional = true}
+hkdf = {"version" = "0.12.4", optional = true}
+
 
 [dev-dependencies]
 tracing-test = "0.2.5"
+link_set = { git = "https://github.com/Ocelmot/link_set", features = ["pipe_link"] }

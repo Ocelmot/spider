@@ -1,19 +1,30 @@
 use std::{
-    collections::{HashMap, HashSet}, net::SocketAddr, path::{Path, PathBuf}, sync::Arc
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    path::PathBuf,
+    sync::Arc,
 };
 
 use directory::Directory;
 use pending::PendingManager;
 use spider_link::{
-    identified_link::IdentifiedLink,
-    link_set::{impls::TCPLink, links::PinnedLink, Epoch, LinkSet, LinkSetMessage},
+    link_set::{
+        impls::authenticated::Authenticated,
+        links::{Address, PinnedLink},
+        Epoch, LinkSet, LinkSetMessage,
+    },
     message::{Invite, Message, RouterMessage},
+    transports::LinkListener,
     Relation,
 };
 use tokio::{
-    fs::remove_file, select, sync::{
-        Mutex, mpsc::{Receiver, Sender, channel, error::SendError}
-    }, task::{JoinError, JoinHandle}
+    fs::remove_file,
+    select,
+    sync::{
+        mpsc::{channel, error::SendError, Receiver, Sender},
+        Mutex,
+    },
+    task::{JoinError, JoinHandle},
 };
 use tracing::{debug, info, warn};
 
@@ -74,7 +85,7 @@ pub(crate) struct RouterProcessorState {
     receiver: Receiver<RouterProcessorMessage>,
 
     key_req: Arc<Mutex<Option<String>>>,
-    listeners: Receiver<Box<dyn IdentifiedLink>>,
+    listeners: Receiver<Authenticated>,
 
     // Directory
     directory: Directory,
@@ -106,12 +117,12 @@ impl RouterProcessorState {
         if directory.is_empty() {
             info!("Directory empty, adding a UI Permit");
             pending.add_ui_permit();
-        }else if permit_file {
+        } else if permit_file {
             info!("Directory not empty, but found permit file, adding a UI Permit");
             pending.add_ui_permit();
         }
 
-        let (listen_tx, listen_rx) = channel::<Box<dyn IdentifiedLink>>(10);
+        let (listen_tx, listen_rx) = channel::<Authenticated>(10);
 
         // set up tcp listener
         let name = pl.state().name().await.clone();
@@ -122,18 +133,15 @@ impl RouterProcessorState {
             info!("Key requests disabled");
             Arc::new(Mutex::new(None))
         };
-        let self_relation = pl.state().self_relation().await;
+        let sr = pl.state().self_relation().await;
         let listen_addr = pl.config().listen_addr.clone();
-        let mut tcp_listener = TCPLink::listen_key_req(self_relation, listen_addr, key_req.clone());
-        let task_tx = listen_tx.clone();
-        tokio::spawn(async move {
-            loop {
-                match tcp_listener.recv().await {
-                    Some(link) => task_tx.send(Box::new(link)).await,
-                    None => break,
-                };
-            }
-        });
+
+        #[cfg(feature = "transport_tcp")]
+        {
+            let tcp_listen_template =
+                spider_link::transports::tcp::TcpListener::new(listen_addr, key_req.clone());
+            let _handle = tcp_listen_template.listen(sr, listen_tx.clone());
+        }
 
         Ok(Self {
             pl,
@@ -161,7 +169,7 @@ impl RouterProcessorState {
                 select! {
                     Some(link) = self.listeners.recv(), if !self.listeners.is_closed() => {
                         trace!("RouterProcessor got new link");
-                        match self.directory.is_link_approved(link.other_relation()) {
+                        match self.directory.is_link_approved(link.relation()) {
                             directory::LinkApproval::Blocked => {
                                 // do nothing, close the link
                                 trace!("Link blocked")
@@ -214,17 +222,13 @@ impl RouterProcessorState {
         self.pl.send_ui(msg).await;
     }
 
-    async fn insert_link<L>(&mut self, link: L) -> SpiderResult
-    where
-        L: Into<Box<dyn IdentifiedLink>> + 'static,
-    {
-        let link = link.into();
-        let rel = link.other_relation().clone();
+    async fn insert_link(&mut self, link: Authenticated) -> SpiderResult {
+        let (rel, link) = link.into_parts();
         match self.links.get_mut(&rel) {
-            Some(link_set) => link_set.add_link(link).await.wrap(),
+            Some(link_set) => link_set.add_link_boxed(link).await.wrap(),
             None => {
                 let mut link_set = self.create_link_set(rel.clone()).await?;
-                link_set.add_link(link).await;
+                link_set.add_link_boxed(link).await;
 
                 create_link_set_recv_task(rel.clone(), &mut link_set, self.sender.clone());
 
@@ -371,11 +375,13 @@ impl RouterProcessorState {
             RouterMessage::Approved => {} // base sends this, not recv
             RouterMessage::Denied => {}   // base sends this, not recv
             RouterMessage::Addrs(addrs) => {
-                self.directory.modify_or_insert_entry(&rel, |entry| {
-                    let mut new_set = HashSet::new();
-                    new_set.extend(addrs.into_iter());
-                    *entry.addrs_mut() = new_set;
-                }).await;
+                self.directory
+                    .modify_or_insert_entry(&rel, |entry| {
+                        let mut new_set = HashSet::new();
+                        new_set.extend(addrs.into_iter());
+                        *entry.addrs_mut() = new_set;
+                    })
+                    .await;
             }
 
             // Event Messages
@@ -686,16 +692,12 @@ impl RouterProcessorState {
         // };
 
         // add tcp link capability
+        #[cfg(feature = "transport_tcp")]
         link_set
-            .add_connector(move |addr| {
-                let sr = self_rel.clone();
-                let r = rel.clone();
-                async {
-                    TCPLink::connect(sr, r, addr)
-                        .await
-                        .map_err(|_| spider_link::link_set::LinkSetError::Closed)
-                }
-            })
+            .add_connector(spider_link::transports::tcp::TcpConnector::new(
+                self_rel.clone(),
+                rel.clone(),
+            ))
             .await
             .wrap()?;
 
@@ -757,10 +759,10 @@ fn create_link_set_recv_task(
     Ok(())
 }
 
-async fn get_addrs(pl: &ProcessorLink) -> Vec<String> {
+async fn get_addrs(pl: &ProcessorLink) -> Vec<Address> {
     debug!("Getting addrs! ------------------ ");
     let mut addrs = HashSet::new();
-    addrs.extend( pl.config().static_addrs.iter().cloned());
+    addrs.extend(pl.config().static_addrs.iter().cloned());
 
     // Dynamic Addrs here
     if pl.config().use_nic_addrs {
@@ -792,9 +794,9 @@ async fn get_addrs(pl: &ProcessorLink) -> Vec<String> {
 
                 let sock_addr = SocketAddr::new(ip, listen_addr.port());
                 debug!("Adding dynamic addr: {:?}", sock_addr);
-                addrs.insert(sock_addr.to_string());
+                addrs.insert(Address::new("auth_tcp", sock_addr.to_string()));
             }
-        }else{
+        } else {
             warn!("Could not parse listen addr");
         }
     }

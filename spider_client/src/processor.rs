@@ -2,17 +2,15 @@ use core::panic;
 use std::{path::PathBuf, time::Duration};
 
 use spider_link::{
-    beacon::Beacon,
-    link_set::{impls::TCPLink, Epoch, LinkSet, LinkSetError, LinkSetMessage},
-    message::{Message, RouterMessage},
-    Relation,
+    link_set::links::Address,
+    Relation, beacon::Beacon, link_set::{Epoch, LinkSet, LinkSetMessage}, message::{Message, RouterMessage},
 };
 use tokio::{
     select, spawn,
     sync::mpsc::{channel, unbounded_channel, Receiver, UnboundedSender},
     task::JoinHandle,
 };
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, trace};
 
 use crate::{
     client_message::{ClientControl, ClientResponse},
@@ -110,23 +108,17 @@ impl SpiderClientProcessor {
         }
 
         // enable TCP link capability
-        let sr = self.state.self_relation.clone();
-        let r = host_relation.clone();
-        link_set
-            .add_connector(move |addr| {
-                let inner_sr = sr.clone();
-                let inner_r = r.clone();
-                async {
-                    TCPLink::connect(inner_sr, inner_r, addr)
-                        .await
-                        .map_err(|e| {
-                            warn!("TCPLINK encountered error {}", e);
-                            LinkSetError::Closed
-                        })
-                }
-            })
-            .await
-            .wrap_msg("failed to add_connector")?;
+        if self.state.transports.contains(&"auth_tcp".to_string()) {
+            let sr = self.state.self_relation.clone();
+            let rel = host_relation.clone();
+            let connector = spider_link::transports::tcp::TcpConnector::new(sr, rel);
+
+            link_set
+                .add_connector(connector)
+                .await
+                .wrap_msg("failed to add_connector")?;
+        }
+        
 
         // Enable fixed addr capability
         if self.state.fixed_addr_enable {
@@ -247,14 +239,14 @@ impl SpiderClientProcessor {
                                 ClientControl::PairAddr(addr) => {
                                     trace!("Pairing to device at {}", addr);
                                     if self.state.host_relation.is_none() {
-                                        if let Some(key_req) = TCPLink::key_request(addr).await{
+                                        if let Ok(key_req) = spider_link::transports::tcp::key_request(addr).await{
                                             trace!("Got key request {:?}", key_req);
                                             self.state.host_relation = Some(Relation::peer_from_id(key_req.key));
                                             self.init_link_set().await.wrap_msg("Failed to initialize link set")?;
                                             // add addr to link set to attempt the connection
                                             if let Some(link_set) = self.link_set.as_ref() {
                                                 trace!("Adding addr to link_set {}", addr);
-                                                let _ = link_set.add_addr(addr.to_string()).await;
+                                                let _ = link_set.add_addr( Address::new("auth_tcp",addr.to_string()) ).await;
                                             }else{
                                                 // This condition indicates that
                                                 // the client could pair but not
@@ -335,7 +327,7 @@ impl SpiderClientProcessor {
                     info!("Client received addr: {:?}", addr);
                     // can only add addrs when the link is paired
                     if let Some(link_set) = &self.link_set{
-                        let _ = link_set.try_addr(addr.to_string()).await;
+                        let _ = link_set.try_addr(Address::new("auth_tcp",addr.to_string()) ).await;
                     }
                 }
             }

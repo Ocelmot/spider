@@ -5,7 +5,7 @@ use std::{
 };
 
 use tracing::{info, trace};
-use spider_link::{ Relation, SelfRelation, identified_link::IdentifiedLink, link_set::{LinkSet, LinkSetMessage, links::PinnedLink}, message::{Message, RouterMessage, UiMessage}};
+use spider_link::{ Relation, SelfRelation, link_set::{LinkSet, LinkSetMessage, impls::authenticated::Authenticated, links::PinnedLink}, message::{Message, RouterMessage, UiMessage}};
 use tokio::{
     select, spawn,
     sync::{
@@ -67,9 +67,8 @@ impl PendingManager {
         self.approval_codes.remove(&code);
     }
 
-    pub async fn add_link<L>(&mut self, link: L) where L: Into<Box<dyn IdentifiedLink>> + 'static {
-        let link = link.into();
-        let rel = link.other_relation().clone();
+    pub async fn add_link(&mut self, link: Authenticated) {
+        let (rel, link) = link.into_parts();
         if let Some(pending) = self.pending_connections.get(&rel) {
             trace!("Pending link set existed, adding link");
             pending.send(PendingLinkControl::AddLink(link)).await;
@@ -170,7 +169,7 @@ pub enum PendingLinkControl {
     Deny,
     AddCode(String),
     RevokeCode(String),
-    AddLink(Box<dyn IdentifiedLink>)
+    AddLink(Box<dyn PinnedLink>),
 }
 
 
@@ -219,7 +218,7 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                         }
                         PendingLinkControl::AddLink(link) => {
                             trace!("Pending adding new link");
-                            link_set.add_link(link).await;
+                            link_set.add_link_boxed(link).await;
                         },
                     }
 

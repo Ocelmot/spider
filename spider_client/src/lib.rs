@@ -44,7 +44,6 @@
 //!     let mut builder = SpiderClientBuilder::load_or_set(&client_path, |builder| {
 //!         // Enable the client to search for the base using addresses from a set list.
 //!         builder.enable_fixed_addrs(true);
-//! #       builder.enable_veilid(false);
 //!         // Define the list of addrs to search for the base.
 //!         builder.set_fixed_addrs(vec!["localhost:1930".into()]);
 //!     }).expect("builder should be able to save file");

@@ -1,8 +1,8 @@
-use std::{num::NonZeroUsize, path::Path};
+use std::{collections::HashSet, num::NonZeroUsize, path::Path};
 
 use lru::LruCache;
 use serde::{ser::SerializeTuple, Deserialize, Deserializer, Serialize, Serializer};
-use spider_link::{Relation, Role, SelfRelation};
+use spider_link::{link_set::links::Address, Relation, Role, SelfRelation};
 use tokio::fs;
 
 use crate::error::{ClientResult, ErrorKind, ProblemWrap};
@@ -22,6 +22,10 @@ pub(crate) struct SpiderClientState {
     #[serde(default = "bool_true")]
     pub auto_reconnect: bool,
 
+    // Transports
+    #[serde(default = "default_transports")]
+    pub transports: HashSet<String>,
+
     // Connection methods
     // Addresses from the Base
     #[serde(default = "bool_true")]
@@ -33,7 +37,7 @@ pub(crate) struct SpiderClientState {
         serialize_with = "serialize_lru",
         deserialize_with = "deserialize_lru"
     )]
-    pub base_addrs: LruCache<String, ()>,
+    pub base_addrs: LruCache<Address, ()>,
 
     // Beacon
     #[serde(default = "bool_true")]
@@ -56,7 +60,7 @@ pub(crate) struct SpiderClientState {
     pub fixed_addr_enable: bool,
 
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub fixed_addrs: Vec<String>,
+    pub fixed_addrs: Vec<Address>,
 }
 
 impl SpiderClientState {
@@ -69,6 +73,9 @@ impl SpiderClientState {
 
             // Config
             auto_reconnect: true,
+
+            //Transports
+            transports: HashSet::new(),
 
             // Last Addresses
             base_addrs_enable: true,
@@ -120,11 +127,11 @@ impl Default for SpiderClientState {
     }
 }
 
-fn default_lru() -> LruCache<String, ()> {
+fn default_lru() -> LruCache<Address, ()> {
     LruCache::new(NonZeroUsize::new(10).unwrap())
 }
 
-fn deserialize_lru<'de, D>(deserializer: D) -> Result<LruCache<String, ()>, D::Error>
+fn deserialize_lru<'de, D>(deserializer: D) -> Result<LruCache<Address, ()>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -137,13 +144,16 @@ where
 
     let mut lru = LruCache::new(cap);
     for item in data.1.into_iter().rev() {
+        let item = item
+            .parse()
+            .map_err(|e| serde::de::Error::custom(format_args!("invalid address {item:?}: {e}")))?;
         lru.push(item, ());
     }
 
     Ok(lru)
 }
 
-fn serialize_lru<S>(lru: &LruCache<String, ()>, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_lru<S>(lru: &LruCache<Address, ()>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
@@ -163,4 +173,10 @@ fn bool_true() -> bool {
 
 pub fn beacon_default_port() -> u16 {
     1930u16
+}
+
+pub fn default_transports() -> HashSet<String> {
+    let mut map = HashSet::new();
+    map.insert("auth_tcp".to_string());
+    map
 }

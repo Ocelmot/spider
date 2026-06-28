@@ -1,10 +1,13 @@
 
+use std::sync::Arc;
+
 use spider_client::{
     link::{
          message::{DatasetData, Message, RouterMessage}, SelfRelation
     }, ClientResponse, SpiderClientBuilder
 };
-use spider_link::{beacon::start_beacon_listen_handler, link_set::{Epoch, LinkSet, LinkSetMessage, impls::TCPLink}, };
+use spider_link::{beacon::start_beacon_listen_handler, link_set::{Epoch, LinkSet, LinkSetMessage, links::Address}, transports::{LinkListener, tcp::TcpListener}, };
+use tokio::sync::{Mutex, mpsc::channel};
 use tracing::info;
 use tracing_test::traced_test;
 use serial_test::serial;
@@ -18,12 +21,14 @@ async fn connect() {
 
     let listen_addr = "127.0.0.1:1950";
     info!("Starting listener");
-    let mut listener = TCPLink::listen(host_relation.clone(), listen_addr);
+    let listener = TcpListener::new(listen_addr.to_string(), Arc::new(Mutex::new(None)));
+    let (listen_tx, mut listen_rx) = channel(10); 
+    listener.listen(host_relation.clone(), listen_tx.clone());
 
     let mut client_builder = SpiderClientBuilder::new_with_self_relation(Some("".into()), client_relation.clone());
     client_builder.enable_beacon(false);
     client_builder.disable_veilid();
-    client_builder.set_fixed_addrs(vec![String::from(listen_addr)]);
+    client_builder.set_fixed_addrs(vec![Address::new("auth_tcp", listen_addr)]);
     client_builder.enable_fixed_addrs(true);
     client_builder.set_host_relation(host_relation.relation.clone());
     info!("Starting client");
@@ -41,9 +46,10 @@ async fn connect() {
     client.send(Message::Router(event)).await.expect("client should be started");
 
     info!("Setting up listen link set");
-    let host_link = listener.recv().await.expect("listener failed to get Link");
+    let host_authed = listen_rx.recv().await.expect("listener failed to get Link");
+    let (_host_rel, host_link) = host_authed.into_parts();
     let mut listen_link_set = LinkSet::new();
-    listen_link_set.add_link(Box::new(host_link)).await.unwrap();
+    listen_link_set.add_link_boxed(host_link).await.unwrap();
 
     info!("Receiving connect message");
     let msg = listen_link_set.recv().await.expect("listen link closed");
@@ -74,7 +80,9 @@ async fn beacon_connect() {
 
     let listen_addr = "127.0.0.1:1960";
     info!("Starting listener");
-    let mut listener = TCPLink::listen(host_relation.clone(), listen_addr);
+    let listener = TcpListener::new(listen_addr.to_string(), Arc::new(Mutex::new(None)));
+    let (listen_tx, mut listen_rx) = channel(10); 
+    listener.listen(host_relation.clone(), listen_tx.clone());
 
     let mut client_builder = SpiderClientBuilder::new_with_self_relation(Some("".into()), client_relation.clone());
     client_builder.enable_beacon(true);
@@ -96,9 +104,10 @@ async fn beacon_connect() {
     client.send(Message::Router(event)).await.expect("client should be started");
 
     info!("Setting up listen link set");
-    let host_link = listener.recv().await.expect("listener failed to get Link");
+    let host_authed = listen_rx.recv().await.expect("listener failed to get Link");
+    let (_host_rel, host_link) = host_authed.into_parts();
     let mut listen_link_set = LinkSet::new();
-    listen_link_set.add_link(Box::new(host_link)).await.unwrap();
+    listen_link_set.add_link_boxed(host_link).await.unwrap();
 
     info!("Receiving connect message");
     let msg = listen_link_set.recv().await.expect("listen link closed");
@@ -127,12 +136,14 @@ async fn client_round_trip() {
 
     let listen_addr = "127.0.0.1:1970";
     info!("Starting listener");
-    let mut listener = TCPLink::listen(host_relation.clone(), listen_addr);
+    let listener = TcpListener::new(listen_addr.to_string(), Arc::new(Mutex::new(None)));
+    let (listen_tx, mut listen_rx) = channel(10); 
+    listener.listen(host_relation.clone(), listen_tx.clone());
 
     let mut client_builder = SpiderClientBuilder::new_with_self_relation(Some("".into()), client_relation.clone());
     client_builder.enable_beacon(false);
     client_builder.disable_veilid();
-    client_builder.set_fixed_addrs(vec![String::from(listen_addr)]);
+    client_builder.set_fixed_addrs(vec![Address::new("auth_tcp", listen_addr)]);
     client_builder.enable_fixed_addrs(true);
     client_builder.set_host_relation(host_relation.relation.clone());
     info!("Starting client");
@@ -150,9 +161,10 @@ async fn client_round_trip() {
     client.send(Message::Router(event)).await.expect("Client should be started");
 
     info!("Setting up listen link set");
-    let host_link = listener.recv().await.expect("listener failed to get Link");
+    let host_authed = listen_rx.recv().await.expect("listener failed to get Link");
+    let (_host_rel, host_link) = host_authed.into_parts();
     let mut listen_link_set = LinkSet::new();
-    listen_link_set.add_link(Box::new(host_link)).await.unwrap();
+    listen_link_set.add_link_boxed(host_link).await.unwrap();
 
     // From client to listener
 

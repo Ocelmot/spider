@@ -9,7 +9,7 @@
 //! spider protocol.
 
 
-use crate::{Role, SpiderId2048};
+use crate::{LinkResult, Role, SpiderId2048, error::{ErrorKind, ProblemWrap}};
 
 use serde::{Deserialize, Serialize};
 
@@ -66,13 +66,6 @@ pub use group::{
     ProposalDatasetChange,
 };
 
-// mod veilid;
-// pub use veilid::{
-//     VeilidFrame,
-//     FrameManager,
-//     VeilidMessage,
-// };
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Frame {
     pub data: Vec<u8>,
@@ -87,6 +80,42 @@ pub struct KeyRequest{
     pub key: SpiderId2048,
     /// The human readable name of the base.
     pub name: String,
+}
+
+impl KeyRequest {
+    /// Converts the KeyRequest into a Vec<u8>
+    pub fn to_bytes(&self) -> Vec<u8>{
+        let key_bytes = self.key.to_bytes();
+        let key_bytes_len = key_bytes.len() as u32;
+
+        let name_bytes = self.name.as_bytes();
+        let name_bytes_len = name_bytes.len() as u32;
+
+        let mut out = Vec::with_capacity(4 + 4 + key_bytes_len as usize + name_bytes_len as usize);
+
+        out.extend_from_slice(&name_bytes_len.to_be_bytes());
+        out.extend_from_slice(name_bytes);
+
+        out.extend_from_slice(&key_bytes_len.to_be_bytes());
+        out.extend_from_slice(key_bytes);
+        
+        out
+    }
+
+    /// Parses the KeyRequest from a slice
+    pub fn from_bytes(data: &[u8]) -> LinkResult<Self>{
+        let (name_len, remainder) = data.split_at_checked(4).ok_or(ErrorKind::Deserialization)?;
+        let name_len = u32::from_be_bytes(name_len.try_into().unwrap());
+        let (name, remainder) = remainder.split_at_checked(name_len as usize).ok_or(ErrorKind::Deserialization)?;
+        let name = String::from_utf8(name.to_vec()).wrap_problem(ErrorKind::Deserialization)?;
+
+        let (key_len, remainder) = remainder.split_at_checked(4).ok_or(ErrorKind::Deserialization)?;
+        let key_len = u32::from_be_bytes(key_len.try_into().unwrap());
+        let (key_bytes, _remainder) = remainder.split_at_checked(key_len as usize).ok_or(ErrorKind::Deserialization)?;
+        let key = SpiderId2048::from_bytes(key_bytes.try_into().unwrap());
+
+        Ok(Self { key, name })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

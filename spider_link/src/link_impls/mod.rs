@@ -1,7 +1,17 @@
-mod tcp_link;
 use std::fmt::Display;
 
-pub use tcp_link::TCPLink;
+
+
+
+mod secure_link;
+mod encrypting;
+mod attested;
+pub mod authenticated;
+
+
+
+// mod tcp_link;
+// pub use tcp_link::TCPLink;
 
 // mod veilid_link;
 // pub use veilid_link::{VeilidLink, VeilidHub, VeilidConnector};

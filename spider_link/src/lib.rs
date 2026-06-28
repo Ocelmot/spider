@@ -27,10 +27,12 @@ pub mod link_set {
     pub use link_set::*;
 	/// Implementations of the link trait for supported connection protocols
 	pub mod impls {
-		pub use crate::link_set_impls::*;
+		pub use crate::link_impls::*;
 	}
 }
-mod link_set_impls;
+mod link_impls;
+
+mod crypto_suites;
 
 pub mod identified_link;
 pub mod id;
@@ -48,3 +50,6 @@ pub type SpiderId2048 = SpiderId<294>;
 
 mod relation;
 pub use relation::{RelSig, Relation, Role, SelfRelation};
+
+
+pub mod transports;

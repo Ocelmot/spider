@@ -6,11 +6,11 @@ use std::{
 };
 
 use crate::{
-    LinkError, LinkResult, Relation, SelfRelation, error::{ErrorKind, Problem, ProblemWrap}, identified_link::IdentifiedLink, link_set::links::Link, link_set_impls::{LinkImplError, LinkImplResult}, message::KeyRequest
+    LinkError, LinkResult, Relation, SelfRelation, error::{ErrorKind, Problem, ProblemWrap}, identified_link::IdentifiedLink, link_set::links::Link, link_impls::{LinkImplError, LinkImplResult}, message::KeyRequest
 };
 
 use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, Key, KeyInit, Nonce};
-use link_set::{links::LinkReader, LinkProtocol};
+use link_set::links::LinkReader;
 use num_bigint::BigUint;
 use rand::{rngs::OsRng, RngCore};
 use tokio::{
