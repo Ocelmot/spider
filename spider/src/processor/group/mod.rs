@@ -2,7 +2,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use tracing::{error, info};
+use tracing::{error, info, trace};
 use num_bigint::BigUint;
 use spider_link::message::{GroupEvent, GroupId, GroupMessage, Message};
 use spider_link::Relation;
@@ -275,7 +275,7 @@ impl GroupProcessorState {
 
     async fn handle_upkeep(&mut self) {
         let self_id = self.state.self_id().await.as_big_uint();
-        info!(
+        trace!(
             "This node's id: {}",
             (self_id % BigUint::from(1000000u32)).to_string()
         );

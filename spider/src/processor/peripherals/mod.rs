@@ -91,7 +91,10 @@ impl PeripheralProcessorState{
                     Some(msg) => msg,
                     None => break,
                 };
-                info!("Peripheral message: {:?}", msg);
+                
+                if !matches!(msg, PeripheralProcessorMessage::Upkeep){
+                    info!("Peripheral message: {:?}", msg);
+                }
 
                 match msg {                    
                     PeripheralProcessorMessage::Install(addr) => self.install_service(addr).await,

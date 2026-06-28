@@ -1001,6 +1001,7 @@ checksum = "8355be11b20d696c8f18f6cc018c4e372165b1fa8126cef092399c9951984ffa"
 [[package]]
 name = "link_set"
 version = "0.1.0"
+source = "git+https://github.com/Ocelmot/link_set?rev=5cb10c4cf63fa714b5704acca76bad6cc64968c3#5cb10c4cf63fa714b5704acca76bad6cc64968c3"
 dependencies = [
  "bincode",
  "futures",

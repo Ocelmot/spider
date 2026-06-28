@@ -76,27 +76,31 @@ async fn main() -> Result<(), io::Error> {
     let config = load_config();
 
     // Setup tracing
-    let filter = filter_fn(|metadata| {
-        if metadata.target().contains("spider") {
-            return true;
-        }
-        // if metadata.target().contains("veilid") && metadata.level() <= &Level::INFO {
-        //     return true
-        // }
-        false
-    });
+    // let filter = filter_fn(|metadata| {
+    //     if metadata.target().contains("spider") {
+    //         return true;
+    //     }
+    //     // if metadata.target().contains("veilid") && metadata.level() <= &Level::INFO {
+    //     //     return true
+    //     // }
+    //     false
+    // });
+
+    let filter = tracing_subscriber::EnvFilter::builder()
+        .with_default_directive("spider=info".parse().unwrap())
+        .with_env_var("SPIDER_LOG")
+        .from_env_lossy();
 
     // let log_path = config.log_path.clone();
     // let file_appender = RollingFileAppender::new(Rotation::NEVER, "", log_path);
     // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::stdout());
-    let subscriber = tracing_subscriber::fmt()
+    tracing_subscriber::fmt()
         .compact()
         // .with_ansi(false)
         .with_writer(non_blocking)
-        .with_max_level(LevelFilter::TRACE)
-        .finish();
-    subscriber.with(filter).init();
+        .with_env_filter(filter)
+        .init();
 
     trace!("trace");
     debug!("debug");
