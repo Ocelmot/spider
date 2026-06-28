@@ -11,13 +11,15 @@ cs_0_x25519_chacha20 = ["dep:x25519-dalek", "dep:hkdf"]
 transport_tcp = []
 
 
-
 [dependencies]
-link_set = { git = "https://github.com/Ocelmot/link_set", features = ["serde", "tcp_link"] }
+link_set = { git = "https://github.com/Ocelmot/link_set", rev = "5cb10c4cf63fa714b5704acca76bad6cc64968c3", features = [
+    "serde",
+    "tcp_link",
+] }
 
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1.16"
-tracing = {version = "0.1", features = ["log"]}
+tracing = { version = "0.1", features = ["log"] }
 
 serde = { version = "1.0.132", features = ["derive", "rc"] }
 serde_with = "3.7.0"
@@ -25,7 +27,6 @@ serde_json = "1.0.73"
 serde_cbor = "0.11.2"
 zstd = "0.13.2"
 flate2 = "1.0.35"
-
 
 
 base64 = "0.21.0"
@@ -46,10 +47,14 @@ auto-const-array = "0.2.2"
 
 # crypto schemes
 # cs_0_x25519_chacha20
-x25519-dalek = {"version" = "2.0.1", features = ["static_secrets"], optional = true}
-hkdf = {"version" = "0.12.4", optional = true}
+x25519-dalek = { "version" = "2.0.1", features = [
+    "static_secrets",
+], optional = true }
+hkdf = { "version" = "0.12.4", optional = true }
 
 
 [dev-dependencies]
 tracing-test = "0.2.5"
-link_set = { git = "https://github.com/Ocelmot/link_set", features = ["pipe_link"] }
+link_set = { git = "https://github.com/Ocelmot/link_set", rev = "5cb10c4cf63fa714b5704acca76bad6cc64968c3", features = [
+    "pipe_link",
+] }

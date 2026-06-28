@@ -9,7 +9,7 @@ edition = "2021"
 
 
 [dependencies]
-spider_link = { git = "https://github.com/Ocelmot/spider", features = ["cs_0_x25519_chacha20", "transport_tcp"]}
+spider_link = { path="../spider_link", features = ["cs_0_x25519_chacha20", "transport_tcp"]}
 
 
 tokio = { version = "1", features = ["full"] }

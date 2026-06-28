@@ -13,7 +13,7 @@ transport_tcp = ["spider_link/transport_tcp"]
 
 [dependencies]
 dht_chord = { git = "https://github.com/Ocelmot/chord_dht", rev = "3c3cbb88042d5e2c3c3f27aa96a596b7222433c9" }
-spider_link = { git = "https://github.com/Ocelmot/spider", rev = "5cb10c4cf63fa714b5704acca76bad6cc64968c3", features = ["cs_0_x25519_chacha20"]}
+spider_link = { path = "../spider_link", features = ["cs_0_x25519_chacha20"] }
 
 tokio = { version = "1", features = ["full"] }
 console-subscriber = "0.4.1"
