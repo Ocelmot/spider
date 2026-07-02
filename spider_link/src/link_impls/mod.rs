@@ -1,17 +1,12 @@
-use std::fmt::Display;
-
-
-
-
 mod secure_link;
 mod encrypting;
 mod attested;
 pub mod authenticated;
 
 
-
-// mod tcp_link;
-// pub use tcp_link::TCPLink;
+// Transport features
+#[cfg(feature = "transport_iroh")]
+pub mod iroh_link;
 
 // mod veilid_link;
 // pub use veilid_link::{VeilidLink, VeilidHub, VeilidConnector};
@@ -31,7 +26,7 @@ pub enum LinkImplError {
 }
 
 impl std::error::Error for LinkImplError {}
-impl Display for LinkImplError{
+impl std::fmt::Display for LinkImplError{
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
 			LinkImplError::Deserialize => write!(f, "Failed to deserialize"),

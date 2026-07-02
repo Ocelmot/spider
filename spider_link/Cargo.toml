@@ -9,6 +9,7 @@ edition = "2021"
 cs_0_x25519_chacha20 = ["dep:x25519-dalek", "dep:hkdf"]
 
 transport_tcp = []
+transport_iroh = ["dep:iroh"]
 
 
 [dependencies]
@@ -47,11 +48,15 @@ auto-const-array = "0.2.2"
 
 # crypto schemes
 # cs_0_x25519_chacha20
-x25519-dalek = { "version" = "2.0.1", features = [
+x25519-dalek = { "version" = "2.0.1", optional = true, features = [
     "static_secrets",
-], optional = true }
+] }
 hkdf = { "version" = "0.12.4", optional = true }
 
+
+# Transport mechanisms
+# transport_iroh
+iroh = { version = "1.0.1", optional = true, features = [] }
 
 [dev-dependencies]
 tracing-test = "0.2.5"

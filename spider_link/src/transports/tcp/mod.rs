@@ -3,13 +3,27 @@
 use std::sync::Arc;
 
 use link_set::{
-    adaptors::peekable::Peekable, link_impls::TcpLink, links::{Link, LinkConnector},
+    adaptors::peekable::Peekable,
+    link_impls::TcpLink,
+    links::{Link, LinkConnector},
 };
-use tokio::{net::ToSocketAddrs, sync::{Mutex, mpsc::Sender}, task::JoinHandle};
+use tokio::{
+    net::ToSocketAddrs,
+    sync::{mpsc::Sender, Mutex},
+    task::JoinHandle,
+};
 
 use crate::{
-    LinkResult, Relation, SelfRelation, error::{ErrorKind, ProblemWrap}, link_impls::authenticated::{Authenticated, connect_link_encrypting}, message::KeyRequest, transports::LinkListener,
+    error::{ErrorKind, ProblemWrap},
+    link_impls::authenticated::{connect_link_encrypting, Authenticated},
+    message::KeyRequest,
+    transports::LinkListener,
+    LinkResult, Relation, SelfRelation,
 };
+
+
+/// The string tag to indicate the Iroh connector scheme
+pub const TCP_SCHEME: &'static str = "auth_tcp";
 
 const KEY_REQ_IDENTIFIER: &'static [u8; 8] = &b"SPDRKYRQ";
 
@@ -26,7 +40,6 @@ impl TcpConnector {
     pub fn new(sr: SelfRelation, rel: Relation) -> Self {
         Self { sr, rel }
     }
-
 }
 
 impl LinkConnector for TcpConnector {
@@ -65,7 +78,10 @@ pub struct TcpListener {
 impl TcpListener {
     /// Create a new listener for tcp links wrapped with encryption
     pub fn new(listen_addr: String, key_req: Arc<Mutex<Option<String>>>) -> Self {
-        Self { listen_addr, key_req }
+        Self {
+            listen_addr,
+            key_req,
+        }
     }
 }
 
@@ -90,7 +106,7 @@ impl LinkListener for TcpListener {
                 let spawn_sender = sender.clone();
                 let spawn_sr = sr.clone();
                 let local_key_req = key_req.clone();
-                tokio::spawn(async move{
+                tokio::spawn(async move {
                     let peeked = tcp_link.peek().await.wrap_msg("peek failed")?;
                     if peeked.starts_with(KEY_REQ_IDENTIFIER) {
                         // handle key req
@@ -99,22 +115,23 @@ impl LinkListener for TcpListener {
                                 key: spawn_sr.relation.id.clone(),
                                 name: name.clone(),
                             };
-                            
-                            tcp_link.send(request.to_bytes()).await.wrap_msg("Failed to reply to key_request")?;
+
+                            tcp_link
+                                .send(request.to_bytes())
+                                .await
+                                .wrap_msg("Failed to reply to key_request")?;
                         }
 
                         tcp_link.close().await.wrap()?;
-                    }else{
+                    } else {
                         // handle authentication
                         let x = Authenticated::listen_encrypting(spawn_sr, tcp_link)
                             .await
                             .wrap()?;
                         spawn_sender.send(x).await.wrap()?;
-                        
-                    }   
-                    LinkResult::Ok(())                 
+                    }
+                    LinkResult::Ok(())
                 });
-                
             }
             LinkResult::Err(ErrorKind::Closed.into())
         })

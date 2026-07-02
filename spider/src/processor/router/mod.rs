@@ -14,7 +14,7 @@ use spider_link::{
         Epoch, LinkSet, LinkSetMessage,
     },
     message::{Invite, Message, RouterMessage},
-    transports::LinkListener,
+    transports::{iroh::IrohHub, LinkListener},
     Relation,
 };
 use tokio::{
@@ -84,9 +84,6 @@ pub(crate) struct RouterProcessorState {
     sender: Sender<RouterProcessorMessage>,
     receiver: Receiver<RouterProcessorMessage>,
 
-    key_req: Arc<Mutex<Option<String>>>,
-    listeners: Receiver<Authenticated>,
-
     // Directory
     directory: Directory,
 
@@ -98,7 +95,13 @@ pub(crate) struct RouterProcessorState {
 
     // Event items
     event_subscribers: HashMap<String, HashSet<Relation>>,
-    // veilid: VeilidHub,
+
+    // Link management items
+    key_req: Arc<Mutex<Option<String>>>,
+    listeners: Receiver<Authenticated>,
+
+    #[cfg(feature = "transport_iroh")]
+    iroh_hub: IrohHub, // veilid: VeilidHub,
 }
 
 impl RouterProcessorState {
@@ -140,16 +143,24 @@ impl RouterProcessorState {
         {
             let tcp_listen_template =
                 spider_link::transports::tcp::TcpListener::new(listen_addr, key_req.clone());
-            let _handle = tcp_listen_template.listen(sr, listen_tx.clone());
+            let _handle = tcp_listen_template.listen(sr.clone(), listen_tx.clone());
         }
+
+        #[cfg(feature = "transport_iroh")]
+        let iroh_hub = {
+            let config_secret = *pl.state().iroh_secret().await;
+            let hub = IrohHub::new(config_secret.into()).await.wrap()?;
+
+            hub.listen(sr.clone(), listen_tx.clone());
+
+            hub
+        };
+        
 
         Ok(Self {
             pl,
             sender,
             receiver,
-
-            key_req,
-            listeners: listen_rx,
 
             directory,
 
@@ -158,6 +169,13 @@ impl RouterProcessorState {
             links: HashMap::new(),
 
             event_subscribers: HashMap::new(),
+
+            // Connection management
+            key_req,
+            listeners: listen_rx,
+
+            #[cfg(feature = "transport_iroh")]
+            iroh_hub,
             // veilid,
         })
     }
@@ -701,6 +719,16 @@ impl RouterProcessorState {
             .await
             .wrap()?;
 
+        #[cfg(feature = "transport_iroh")]
+        link_set
+            .add_connector(spider_link::transports::iroh::IrohConnector::new(
+                self_rel.clone(),
+                rel.clone(),
+                self.iroh_hub.endpoint().clone(),
+            ))
+            .await
+            .wrap()?;
+
         // TODO: make the link capabilities variable
         Ok(link_set)
     }
@@ -799,6 +827,16 @@ async fn get_addrs(pl: &ProcessorLink) -> Vec<Address> {
         } else {
             warn!("Could not parse listen addr");
         }
+    }
+
+    // Iroh addr
+    #[cfg(feature = "transport_iroh")]
+    {
+        use spider_link::transports::iroh::{SecretKey, IROH_SCHEME};
+        let bytes = pl.state().iroh_secret().await;
+        let key = SecretKey::from_bytes(&bytes);
+        let address = Address::new(IROH_SCHEME, key.public().to_string());
+        addrs.insert(address);
     }
 
     addrs.into_iter().collect()

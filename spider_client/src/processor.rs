@@ -1,9 +1,14 @@
 use core::panic;
 use std::{path::PathBuf, time::Duration};
 
+#[cfg(feature = "transport_iroh")]
+use spider_link::transports::iroh::{IrohHub, SecretKey};
 use spider_link::{
+    beacon::Beacon,
     link_set::links::Address,
-    Relation, beacon::Beacon, link_set::{Epoch, LinkSet, LinkSetMessage}, message::{Message, RouterMessage},
+    link_set::{Epoch, LinkSet, LinkSetMessage},
+    message::{Message, RouterMessage},
+    Relation,
 };
 use tokio::{
     select, spawn,
@@ -24,6 +29,8 @@ pub(crate) struct SpiderClientProcessor {
     state: SpiderClientState,
     link_set: Option<LinkSet<Message>>,
     beacon: Beacon,
+    #[cfg(feature = "transport_iroh")]
+    iroh_hub: Option<IrohHub>,
     client_channel: ClientChannel,
     receiver: Receiver<ClientControl>,
     on_message: Option<Box<dyn FnMut(&ClientChannel, Message, Epoch) + Send>>,
@@ -56,11 +63,28 @@ impl SpiderClientProcessor {
         let mut beacon = Beacon::new(Duration::from_secs(10));
         beacon.set_port(state.beacon_port);
 
+        #[cfg(feature = "transport_iroh")]
+        let iroh_hub ={
+            use spider_link::transports::iroh::IROH_SCHEME;
+            let mut iroh_hub = None;
+            if state.transports.contains(IROH_SCHEME) {
+                match IrohHub::new(SecretKey::generate()).await {
+                    Ok(hub) => iroh_hub = Some(hub),
+                    Err(e) => {
+                        error!("Failed to initialize Iroh transport: {}", e);
+                    }
+                }
+            }
+            iroh_hub
+        };
+
         let mut processor = Self {
             state_path,
             state,
             link_set: None,
             beacon,
+            #[cfg(feature = "transport_iroh")]
+            iroh_hub,
             client_channel: client_channel.clone(),
             receiver,
             on_message: None,
@@ -108,7 +132,7 @@ impl SpiderClientProcessor {
         }
 
         // enable TCP link capability
-        if self.state.transports.contains(&"auth_tcp".to_string()) {
+        if self.state.transports.contains("auth_tcp") {
             let sr = self.state.self_relation.clone();
             let rel = host_relation.clone();
             let connector = spider_link::transports::tcp::TcpConnector::new(sr, rel);
@@ -116,9 +140,28 @@ impl SpiderClientProcessor {
             link_set
                 .add_connector(connector)
                 .await
-                .wrap_msg("failed to add_connector")?;
+                .wrap_msg("failed to add TCP connector")?;
         }
-        
+
+        #[cfg(feature = "transport_iroh")]
+        if self
+            .state
+            .transports
+            .contains(spider_link::transports::iroh::IROH_SCHEME)
+        {
+            use spider_link::transports::iroh::IrohConnector;
+
+            if let Some(hub) = &self.iroh_hub {
+                let sr = self.state.self_relation.clone();
+                let rel = host_relation.clone();
+
+                let connector = IrohConnector::new(sr, rel, hub.endpoint().clone());
+                link_set
+                    .add_connector(connector)
+                    .await
+                    .wrap_msg("Failed to add Iroh Connector")?;
+            }
+        }
 
         // Enable fixed addr capability
         if self.state.fixed_addr_enable {

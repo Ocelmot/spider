@@ -12,6 +12,9 @@ use crate::{LinkResult, SelfRelation, link_impls::authenticated::Authenticated};
 #[cfg(feature = "transport_tcp")]
 pub mod tcp;
 
+#[cfg(feature = "transport_iroh")]
+pub mod iroh;
+
 /// LinkListeners start listen tasks that generate links for a particular scheme
 pub trait LinkListener {
     /// The scheme this listener produces

@@ -8,8 +8,9 @@ default-run = "spider"
 
 [features]
 default = ["default_transports"]
-default_transports = ["transport_tcp"]
+default_transports = ["transport_tcp", "transport_iroh"]
 transport_tcp = ["spider_link/transport_tcp"]
+transport_iroh = ["spider_link/transport_iroh"]
 
 [dependencies]
 dht_chord = { git = "https://github.com/Ocelmot/chord_dht", rev = "3c3cbb88042d5e2c3c3f27aa96a596b7222433c9" }
@@ -23,7 +24,7 @@ network-interface = "2.0.0"
 toml = "0.8.19"
 serde_json = "1.0.73"
 serde = { version = "1.0.132", features = ["derive"] }
-serde_with = "3.7.0"
+serde_with = {version = "3.7.0", features = ["base64"]}
 
 
 tracing = "0.1"

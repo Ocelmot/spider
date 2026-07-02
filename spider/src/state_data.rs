@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, base64::Base64};
 use spider_link::{message::DirectoryEntry, Relation, Role, SelfRelation, SpiderId2048};
 use std::{
     collections::HashMap,
@@ -37,7 +38,7 @@ impl StateData {
         let mut rng = rand::thread_rng();
         let priv_key = RsaPrivateKey::new(&mut rng, 2048).expect("failed to generate key");
         let bytes = priv_key.to_pkcs8_der().unwrap().as_bytes().to_vec();
-        StateData {
+        Self {
             filename: Arc::new(Mutex::new(path)),
             inner: Arc::new(Mutex::new(StateDataInner::new(bytes))),
         }
@@ -80,12 +81,6 @@ impl StateData {
         MutexGuard::map(inner, |i| i.name.get_or_insert(String::from("NoName")))
     }
 
-    // pub async fn veilid_own_dht(&self) -> MappedMutexGuard<'_, Option<()>> {
-    //     let inner = self.inner.lock().await;
-    //     // MutexGuard::map(inner, |i| &mut i.veilid_own_dht)
-    //     MutexGuard::map(inner, |i| None)
-    // }
-
     pub async fn load_directory(&self) -> HashMap<Relation, DirectoryEntry> {
         let inner = self.inner.lock().await;
         let mut ret = HashMap::new();
@@ -103,8 +98,23 @@ impl StateData {
         let mut inner = self.inner.lock().await;
         inner.directory = v;
     }
+
+    // Transport related data
+
+    pub async fn iroh_secret(&self) -> MappedMutexGuard<'_, [u8; 32]> {
+        let inner = self.inner.lock().await;
+        MutexGuard::map(inner, |f| &mut f.iroh_secret)
+    }
+
+    // pub async fn veilid_own_dht(&self) -> MappedMutexGuard<'_, Option<()>> {
+    //     let inner = self.inner.lock().await;
+    //     // MutexGuard::map(inner, |i| &mut i.veilid_own_dht)
+    //     MutexGuard::map(inner, |i| None)
+    // }
+
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 struct StateDataInner {
     pub key_der: Vec<u8>,
@@ -116,12 +126,17 @@ struct StateDataInner {
     // Router Items
     #[serde(default)]
     name: Option<String>,
-    /// Map from chord names to listen_adder, pub_addr, and vectors of recent addresses
-    // #[serde(default)]
-    // veilid_own_dht: Option<DHTRecordDescriptor>,
 
     #[serde(default)]
     directory: Vec<DirectoryEntry>,
+
+    // Transport config items
+    #[serde_as(as = "Base64")]
+    #[serde(default = "iroh_default")]
+    iroh_secret: [u8; 32],
+
+    // #[serde(default)]
+    // veilid_own_dht: Option<DHTRecordDescriptor>,
 }
 
 impl StateDataInner {
@@ -134,8 +149,22 @@ impl StateDataInner {
 
             // Router Items
             name: None,
-            // veilid_own_dht: None,
+            
             directory: Vec::new(),
+
+            // Transport items
+            iroh_secret: iroh_default(),
+
+            // veilid_own_dht: None,
         }
     }
+}
+
+fn iroh_default() -> [u8; 32]{
+    use rand::RngCore;
+
+    let mut new_secret = [0u8; 32];
+    let mut rng = rand::rngs::OsRng;
+    rng.fill_bytes(&mut new_secret);
+    new_secret
 }

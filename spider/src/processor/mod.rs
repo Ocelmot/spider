@@ -95,6 +95,7 @@ impl ProcessorBuilder {
             Some(state) => state,
             None => return Err(SpiderError::new().msg("Failed to read state")),
         };
+        state.save_file().await; // normalizes the state file
         let processor = Processor::new(config, state).await?;
         Ok(processor.start())
     }
