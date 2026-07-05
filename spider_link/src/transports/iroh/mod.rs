@@ -49,7 +49,7 @@ impl LinkConnector for IrohConnector {
     }
 
     async fn connect(
-        &mut self,
+        &self,
         addr: String,
     ) -> Result<impl link_set::links::Link + 'static, impl std::error::Error + Send + Sync + 'static>
     {

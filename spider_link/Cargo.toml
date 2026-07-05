@@ -13,7 +13,7 @@ transport_iroh = ["dep:iroh"]
 
 
 [dependencies]
-link_set = { git = "https://github.com/Ocelmot/link_set", rev = "5cb10c4cf63fa714b5704acca76bad6cc64968c3", features = [
+link_set = { git = "https://github.com/Ocelmot/link_set", rev = "fb6c83b045cb074d429f419d300bbe8152bcfacb", features = [
     "serde",
     "tcp_link",
 ] }
@@ -60,6 +60,6 @@ iroh = { version = "1.0.1", optional = true, features = [] }
 
 [dev-dependencies]
 tracing-test = "0.2.5"
-link_set = { git = "https://github.com/Ocelmot/link_set", rev = "5cb10c4cf63fa714b5704acca76bad6cc64968c3", features = [
+link_set = { git = "https://github.com/Ocelmot/link_set", rev = "fb6c83b045cb074d429f419d300bbe8152bcfacb", features = [
     "pipe_link",
 ] }

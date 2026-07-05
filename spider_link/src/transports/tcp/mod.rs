@@ -48,7 +48,7 @@ impl LinkConnector for TcpConnector {
     }
 
     async fn connect(
-        &mut self,
+        &self,
         addr: String,
     ) -> Result<impl Link + 'static, impl std::error::Error + Send + Sync + 'static> {
         let tcp_link = TcpLink::connect(addr).await.wrap()?;
@@ -122,7 +122,9 @@ impl LinkListener for TcpListener {
                                 .wrap_msg("Failed to reply to key_request")?;
                         }
 
-                        tcp_link.close().await.wrap()?;
+                        // Link::close was removed; dropping the link closes
+                        // the underlying stream.
+                        drop(tcp_link);
                     } else {
                         // handle authentication
                         let x = Authenticated::listen_encrypting(spawn_sr, tcp_link)

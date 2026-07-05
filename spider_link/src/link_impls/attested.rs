@@ -199,6 +199,10 @@ impl<L: SecureLink> Establish for Attested<L> {
 }
 
 impl<L: SecureLink> Link for Attested<L> {
+    fn scheme() -> &'static str {
+        L::scheme()
+    }
+
     async fn send(
         &mut self,
         msg: Vec<u8>,

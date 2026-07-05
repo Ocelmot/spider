@@ -326,6 +326,10 @@ impl<L: Link> Establish for Encrypting<L> {
 }
 
 impl<L: Link> Link for Encrypting<L> {
+    fn scheme() -> &'static str {
+        L::scheme()
+    }
+
     async fn send(
         &mut self,
         msg: Vec<u8>,

@@ -7,6 +7,7 @@ use tracing::error;
 use crate::{
     error::{ErrorKind, ProblemWrap},
     link_impls::secure_link::SecureLink,
+    transports::iroh::IROH_SCHEME,
     LinkResult,
 };
 
@@ -46,6 +47,10 @@ impl LinkReader for IrohLinkReader {
 }
 
 impl Link for IrohLink {
+    fn scheme() -> &'static str {
+        IROH_SCHEME
+    }
+
     async fn send(
         &mut self,
         msg: Vec<u8>,
@@ -74,12 +79,6 @@ impl Link for IrohLink {
                 Err(e).wrap_msg("Recv failed")?
             }
         }
-    }
-
-    async fn close(&mut self) -> Result<(), impl std::error::Error + Send + Sync + 'static> {
-        self.closed = true;
-        self.conn.close(0u8.into(), b"Peer Closed");
-        LinkResult::Ok(())
     }
 
     fn take_reader(
