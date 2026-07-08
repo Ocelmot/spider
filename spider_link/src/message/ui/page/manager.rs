@@ -98,7 +98,7 @@ impl UiPageManager {
     /// using the provided [UiPath] to determine which element.
     /// Making changes to a [UiElement] through a [UiElementRef] allows
     /// changes to be captured by the UiPageManager.
-    pub fn get_element_mut(&mut self, path: &UiPath) -> Option<UiElementRef> {
+    pub fn get_element_mut(&mut self, path: &UiPath) -> Option<UiElementRef<'_>> {
         let mut cursor = &mut self.page.root;
         for child_index in path.iter() {
             cursor = match cursor.get_child_mut(*child_index) {
@@ -141,7 +141,7 @@ impl UiPageManager {
 
     /// Get a [UiElementRef] that refers to an element in the [UiPage]
     /// determined by its id.
-    pub fn get_by_id_mut(&mut self, id: &str) -> Option<UiElementRef> {
+    pub fn get_by_id_mut(&mut self, id: &str) -> Option<UiElementRef<'_>> {
         let path = match self.ids.get(id) {
             Some(path) => path.clone(),
             None => return None,

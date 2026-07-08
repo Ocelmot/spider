@@ -30,7 +30,7 @@ impl<'a> UiElementRef<'a>{
         self.element.get_child_mut(index)
     }
 
-    pub fn children_mut(&mut self) -> std::slice::IterMut<UiElement> {
+    pub fn children_mut(&mut self) -> std::slice::IterMut<'_, UiElement> {
         match &mut self.element.children {
             Some(c) => {
                 self.element.changes.root().set_children_accessed();
@@ -40,7 +40,7 @@ impl<'a> UiElementRef<'a>{
         }
     }
 
-    pub fn children_raw(&mut self) -> std::slice::IterMut<UiElement> {
+    pub fn children_raw(&mut self) -> std::slice::IterMut<'_, UiElement> {
         self.element.children_mut()
     }
 

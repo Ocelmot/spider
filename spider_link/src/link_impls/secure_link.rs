@@ -1,4 +1,4 @@
-use link_set::{adaptors::peekable::Peekable, links::Link};
+use link_set::links::Link;
 
 /// A link that already provides encryption. Implementing this is a security
 /// claim.
@@ -10,9 +10,3 @@ pub trait SecureLink: Link {
     /// Provides binding material for this encrypted link.
     fn binding(&self) -> &[u8];
 }
-
-// impl<L:SecureLink> SecureLink for Peekable<L>{
-//     fn binding(&self) -> &[u8] {
-        
-//     }
-// }

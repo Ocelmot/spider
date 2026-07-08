@@ -9,7 +9,7 @@
 //! spider protocol.
 
 
-use crate::{LinkResult, Role, SpiderId2048, error::{ErrorKind, ProblemWrap}};
+use crate::{LinkResult, SpiderId2048, error::{ErrorKind, ProblemWrap}};
 
 use serde::{Deserialize, Serialize};
 
@@ -66,11 +66,6 @@ pub use group::{
     ProposalDatasetChange,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct Frame {
-    pub data: Vec<u8>,
-}
-
 /// The key request is used by a peripheral to get the id and
 /// name of the listening base. This struct contains the
 /// response to that request.
@@ -116,12 +111,6 @@ impl KeyRequest {
 
         Ok(Self { key, name })
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum Protocol {
-    Introduction { id: SpiderId2048, role: Role },
-    Message(Message),
 }
 
 /// A Message sent to or from a member of the spider network.

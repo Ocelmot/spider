@@ -10,7 +10,7 @@ pub struct UiPath{
 }
 
 impl UiPath {
-    /// Create a new UiPath refering to the root of the UiPage
+    /// Create a new UiPath referring to the root of the UiPage
     pub fn root() -> Self{
         Self {
             path: Vec::new()
@@ -19,13 +19,13 @@ impl UiPath {
 
     /// Returns an iterator over the indices of the children of the UiElements
     /// in the UiPage
-    pub fn iter(&self) -> Iter<usize> {
+    pub fn iter(&self) -> Iter<'_, usize> {
         self.path.iter()
     }
 
     /// Modifies the path to refer to the parent of the current element.
     /// Returns true if the operation was successful, and false when the path
-    /// was refering to the root element and could not move to the parent.
+    /// was referring to the root element and could not move to the parent.
     pub fn parent_of(&mut self) -> bool {
         match self.path.pop(){
             Some(_) => true,

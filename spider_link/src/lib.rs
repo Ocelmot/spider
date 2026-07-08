@@ -34,7 +34,6 @@ mod link_impls;
 
 mod crypto_suites;
 
-pub mod identified_link;
 pub mod id;
 pub mod message;
 use id::SpiderId;
