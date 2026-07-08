@@ -279,7 +279,7 @@ impl SpiderClientBuilder {
             if let Some(code) = keyfile.permission_code {
                 self.set_permission_code(code);
             }
-            let _ = self.save();
+            let _ = self.save().await;
         }
     }
 }
