@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, base64::Base64};
 use spider_link::{message::DirectoryEntry, Relation, Role, SelfRelation, SpiderId2048};
+use tracing::warn;
 use std::{
     collections::HashMap,
     fs, io,
@@ -48,7 +49,9 @@ impl StateData {
         let filename = self.filename.lock().await;
         let inner = self.inner.lock().await;
         let contents = serde_json::to_string(&*inner).unwrap();
-        tokio::fs::write(&*filename, contents).await;
+        if let Err(e) = tokio::fs::write(&*filename, contents).await {
+            warn!("Failed to save state file: {e}");
+        }
     }
 
     pub async fn priv_key(&self) -> RsaPrivateKey {

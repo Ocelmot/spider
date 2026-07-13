@@ -30,7 +30,13 @@
 //!
 //! ```
 //! use std::path::PathBuf;
-//! use spider_client::SpiderClientBuilder;
+//! use spider_client::{
+//!     SpiderClientBuilder,
+//!     link::{
+//!         link_set::links::Address,
+//!         transports::tcp::TCP_SCHEME
+//!     }
+//! };
 //!
 //! #[tokio::main]
 //! async fn main() {
@@ -45,8 +51,8 @@
 //!         // Enable the client to search for the base using addresses from a set list.
 //!         builder.enable_fixed_addrs(true);
 //!         // Define the list of addrs to search for the base.
-//!         builder.set_fixed_addrs(vec!["localhost:1930".into()]);
-//!     }).expect("builder should be able to save file");
+//!         builder.set_fixed_addrs(vec![Address::new(TCP_SCHEME, "localhost:1930")]);
+//!     }).await.expect("builder should be able to save file");
 //!
 //!     // Load the base's key from a keyfile if it exists.
 //!     builder.try_use_keyfile("spider_keyfile.json").await;

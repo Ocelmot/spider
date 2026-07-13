@@ -8,18 +8,14 @@ use iroh::{
     Endpoint,
 };
 
-use link_set::links::LinkConnector;
+use link_set::links::{AddressRepr, LinkConnector};
 use tokio::{sync::mpsc::Sender, task::JoinHandle};
 use tracing::debug;
 
 use crate::{
-    error::ProblemWrap,
-    link_impls::{
-        authenticated::{connect_link_attested, Authenticated},
-        iroh_link::IrohLink,
-    },
-    transports::LinkListener,
-    LinkError, LinkResult, Relation, SelfRelation,
+    LinkError, LinkResult, Relation, SelfRelation, error::{ErrorKind, ProblemWrap}, link_impls::{
+        authenticated::{Authenticated, connect_link_attested}, iroh_link::IrohLink,
+    }, transports::LinkListener,
 };
 
 /// The string tag to indicate the Iroh connector scheme
@@ -50,10 +46,16 @@ impl LinkConnector for IrohConnector {
 
     async fn connect(
         &self,
-        addr: String,
+        addr: AddressRepr,
     ) -> Result<impl link_set::links::Link + 'static, impl std::error::Error + Send + Sync + 'static>
     {
-        let id = iroh::EndpointId::from_str(&addr).wrap()?;
+        let id = match &addr {
+            AddressRepr::String(string) => iroh::EndpointId::from_str(&string).wrap()?,
+            AddressRepr::Bytes(bytes) => {
+                let bytes: &[u8;32] = bytes.as_slice().try_into().map_err(|_| ErrorKind::Deserialization)?;
+                iroh::EndpointId::from_bytes(&bytes).wrap()?
+            },
+        };
         let conn = self
             .endpoint
             .connect(id, ALPN)

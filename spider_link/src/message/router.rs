@@ -1,9 +1,10 @@
-use base64::{engine::general_purpose, Engine};
 use link_set::links::Address;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-use crate::{Relation, SelfRelation};
+use crate::{
+    LinkResult, Relation, SelfRelation, error::{ErrorKind, ProblemWrap}, utils::base62::{base62_decode, base62_encode},
+};
 
 use super::DatasetData;
 
@@ -65,7 +66,7 @@ pub enum RouterMessage {
 
     // Invitation messages
     /// An invite that can be sent to another node, allowing them to connect.
-    /// 
+    ///
     /// When sent from the base to a peripheral, this is a newly generated
     /// invite to be sent. When sent to the base, this is an Invite from another
     /// user and will be used to try to connect to them.
@@ -122,17 +123,19 @@ impl DirectoryEntry {
     }
 }
 
+const INVITE_V1: &'static [u8; 8] = b"SPDRIV01";
+
 /// An invite to establish a connection to some other base node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Invite {
     rel: Relation,
     addrs: Vec<Address>,
-    invite_code: String,
+    invite_code: Vec<u8>,
 }
 
 impl Invite {
     /// Create a new Invite to establish a connection to this node.
-    pub fn new(self_rel: &SelfRelation, addrs: Vec<Address>, invite_code: String) -> Self {
+    pub fn new(self_rel: &SelfRelation, addrs: Vec<Address>, invite_code: Vec<u8>) -> Self {
         Self {
             rel: self_rel.relation.clone(),
             addrs,
@@ -151,65 +154,102 @@ impl Invite {
     }
 
     /// Get a reference to this Invite's invite code
-    pub fn invite_code(&self) -> &String {
-        &self.invite_code
+    pub fn invite_code_string(&self) -> String {
+        base62_encode(&self.invite_code)
     }
 
     /// Convert this invite into a string representation to send to another node.
-    pub fn to_base64(&self) -> String {
-        let bytes = serde_cbor::to_vec(self).unwrap();
-        general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    pub fn encode(&self) -> String {
+        let mut bytes = Vec::new();
+        
+        // rel
+        bytes.extend_from_slice(&self.rel.to_minimal_bytes());
+        // addrs
+        let addr_count = self.addrs.len() as u8;
+        bytes.push(addr_count);
+        for addr in &self.addrs {
+            let addr_bytes = addr.to_bytes();
+            let addr_len = addr_bytes.len() as u16;
+            bytes.extend_from_slice(&addr_len.to_be_bytes());
+            bytes.extend_from_slice(&addr_bytes);
+        }
+        // invite code
+        bytes.extend_from_slice(&self.invite_code);
+        
+        let encoded = base62_encode(&bytes);
+        [str::from_utf8(INVITE_V1).unwrap(), &encoded].concat()
     }
 
     /// Convert this invite from a string representation sent from another node.
-    pub fn from_base64<T>(s: T) -> Option<Self>
+    pub fn decode<T>(s: T) -> LinkResult<Self>
     where
-        T: AsRef<[u8]>,
+        T: AsRef<str>,
     {
-        let bytes = general_purpose::URL_SAFE_NO_PAD.decode(s).ok()?;
-        serde_cbor::from_slice(&bytes).ok()
-    }
+        let s = s.as_ref().replace(&['`', ' ', '\t', '\r', '\n'][..], "");
+        let (invite_ver, remainder) = s.as_bytes().split_first_chunk().wrap_problem(ErrorKind::Deserialization)?;
+        let bytes = base62_decode(remainder)?;
+        let remainder = bytes.as_slice();
 
-    /// Generate the sha 256 hash of this invite
-    pub fn sha256(&self) -> String {
-        let bytes = serde_cbor::to_vec(self).unwrap();
-        sha256::digest(bytes.as_slice())
+        // check invite version
+        match invite_ver {
+            INVITE_V1 => {
+                let (rel_bytes, remainder) = remainder.split_at_checked(257).wrap_problem(ErrorKind::Deserialization)?;
+                let rel = Relation::from_minimal_bytes(rel_bytes)?;
+
+                let (addr_count_bytes, mut remainder) = remainder.split_at_checked(1).wrap_problem(ErrorKind::Deserialization)?;
+                let addr_count = addr_count_bytes[0];
+                let mut addrs = Vec::with_capacity(addr_count.into());
+                for _ in 0..addr_count {
+                    let loop_remainder = remainder;
+                    let (addr_len_bytes, loop_remainder) = loop_remainder.split_at_checked(2).wrap_problem(ErrorKind::Deserialization)?;
+                    let addr_len = u16::from_be_bytes(addr_len_bytes.try_into().unwrap());
+                    let (addr_bytes, loop_remainder) = loop_remainder.split_at_checked(addr_len.into()).wrap_problem(ErrorKind::Deserialization)?;
+                    let addr = Address::from_bytes(addr_bytes).wrap_problem(ErrorKind::Deserialization)?;
+                    addrs.push(addr);
+                    remainder = loop_remainder;
+                }
+
+                let invite_code = remainder.to_vec();
+
+                Ok(Self { rel, addrs, invite_code })
+            },
+            _ => {
+                return Err(ErrorKind::Deserialization)?;
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
 
-    // use rand::random;
-    // use tracing::info;
-    // use tracing_test::traced_test;
-    // use veilid_core::{CryptoKey, FourCC, TypedKey};
+    use tracing::info;
+    use tracing_test::traced_test;
 
-    // use crate::SelfRelation;
+    use crate::SelfRelation;
 
-    // use super::*;
+    use super::*;
 
     // Test the invite's roundtrip with other means
-    // #[test]
-    // #[traced_test]
-    // fn invite_round_trip() {
-    //     let rel = SelfRelation::debug_get(5).relation;
-    //     let key = CryptoKey::new(random());
-    //     let typed_key = TypedKey::new(FourCC::default(), key);
-    //     let addrs = vec![typed_key.to_string()];
-    //     let invite_code = String::from("test invite code");
-    //     let invite = Invite {
-    //         rel,
-    //         addrs,
-    //         invite_code,
-    //     };
+    #[test]
+    #[traced_test]
+    fn invite_round_trip() {
+        let rel = SelfRelation::debug_get(5).relation;
+        let addr = Address::new("test", "test_addr");
+        let addrs = vec![addr];
+        let invite_code = b"test invite code".to_vec();
+        let invite = Invite {
+            rel,
+            addrs,
+            invite_code,
+        };
 
-    //     let serialized = invite.to_base64();
-    //     info!("serialized: {}", serialized);
-    //     let deserialized = Invite::from_base64(serialized).expect("deserialization should succeed");
+        let serialized = invite.encode();
+        info!("serialized: {}", serialized);
+        let deserialized = Invite::decode(serialized).expect("deserialization should succeed");
 
-    //     assert_eq!(invite.rel, deserialized.rel);
-    //     assert_eq!(invite.addrs, deserialized.addrs);
-    //     assert_eq!(invite.invite_code, deserialized.invite_code);
-    // }
+        assert_eq!(invite.rel, deserialized.rel);
+        assert_eq!(invite.addrs, deserialized.addrs);
+        assert_eq!(invite.invite_code, deserialized.invite_code);
+    }
 }

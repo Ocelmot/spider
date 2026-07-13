@@ -3,9 +3,7 @@
 use std::sync::Arc;
 
 use link_set::{
-    adaptors::peekable::Peekable,
-    link_impls::TcpLink,
-    links::{Link, LinkConnector},
+    adaptors::peekable::Peekable, link_impls::TcpLink, links::{AddressRepr, Link, LinkConnector},
 };
 use tokio::{
     net::ToSocketAddrs,
@@ -49,9 +47,11 @@ impl LinkConnector for TcpConnector {
 
     async fn connect(
         &self,
-        addr: String,
+        addr: AddressRepr,
     ) -> Result<impl Link + 'static, impl std::error::Error + Send + Sync + 'static> {
-        let tcp_link = TcpLink::connect(addr).await.wrap()?;
+
+        let tcp_link = TcpLink::connect_address(addr).await.wrap()?;
+
         let (_rel, encrypted) =
             connect_link_encrypting(self.sr.clone(), self.rel.clone(), tcp_link).await?;
 

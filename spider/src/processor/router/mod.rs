@@ -10,7 +10,7 @@ use pending::PendingManager;
 use spider_link::{
     link_set::{
         impls::authenticated::Authenticated,
-        links::{Address, PinnedLink},
+        links::Address,
         Epoch, LinkSet, LinkSetMessage,
     },
     message::{Invite, Message, RouterMessage},
@@ -29,15 +29,14 @@ use tokio::{
 use tracing::{debug, info, warn};
 
 use rand::{
-    distributions::Alphanumeric, rngs::StdRng, seq::SliceRandom, thread_rng, Rng, SeedableRng,
+    Rng, SeedableRng, distributions::Standard, rngs::StdRng, seq::SliceRandom, thread_rng,
 };
 use tracing::trace;
 
 use network_interface::NetworkInterfaceConfig;
 
 use crate::{
-    error::{ProblemWrap, SpiderError, SpiderResult},
-    processor::router::pending::remove_pending_ui_setting,
+    error::{ProblemWrap, SpiderError, SpiderResult}
 };
 
 use super::{link::ProcessorLink, message::ProcessorMessage, ui::UiProcessorMessage};
@@ -600,7 +599,7 @@ impl RouterProcessorState {
         link_set.connect().await;
 
         // send approval code
-        let msg = RouterMessage::ApprovalCode(invite.invite_code().clone());
+        let msg = RouterMessage::ApprovalCode(invite.invite_code_string());
         link_set.send(Message::Router(msg)).await;
 
         // Send name
@@ -628,27 +627,26 @@ impl RouterProcessorState {
 
         let rng = thread_rng();
         let invite_code = rng
-            .sample_iter(Alphanumeric)
-            .take(15)
-            .map(char::from)
+            .sample_iter(Standard)
+            .take(8)
             .collect();
         let invite = Invite::new(&self_rel, addrs, invite_code);
 
         // add code to pending
         self.pending
-            .add_approval_code(invite.invite_code().to_string())
+            .add_approval_code(invite.invite_code_string())
             .await;
 
         // add invite to ui
         let msg = UiProcessorMessage::SetSetting {
             header: "Pending Connections".into(),
-            title: format!("Invite: {}", invite.invite_code()),
+            title: format!("Invite: {}", invite.invite_code_string()),
             inputs: vec![
                 ("button".into(), "View".into()),
                 ("button".into(), "Revoke".into()),
             ],
             cb: |e| {
-                let invite = Invite::from_base64(e.data()).expect("base 64 should parse");
+                let invite = Invite::decode(e.data()).ok()?;
                 // View
                 if e.index() == 0 {
                     let msg = RouterMessage::Invite(invite);
@@ -659,14 +657,14 @@ impl RouterProcessorState {
                 }
                 // Revoke
                 else if e.index() == 1 {
-                    let revoke_id = invite.invite_code().to_string();
+                    let revoke_id = invite.invite_code_string();
                     let msg = RouterProcessorMessage::RevokeInvite(revoke_id);
                     let msg = ProcessorMessage::RouterMessage(msg);
                     return Some(msg);
                 }
                 None
             },
-            data: invite.to_base64(),
+            data: invite.encode(),
         };
         self.pl.send_ui(msg).await;
 
@@ -822,7 +820,7 @@ async fn get_addrs(pl: &ProcessorLink) -> Vec<Address> {
 
                 let sock_addr = SocketAddr::new(ip, listen_addr.port());
                 debug!("Adding dynamic addr: {:?}", sock_addr);
-                addrs.insert(Address::new("auth_tcp", sock_addr.to_string()));
+                addrs.insert(Address::new("auth_tcp", sock_addr));
             }
         } else {
             warn!("Could not parse listen addr");
@@ -835,7 +833,7 @@ async fn get_addrs(pl: &ProcessorLink) -> Vec<Address> {
         use spider_link::transports::iroh::{SecretKey, IROH_SCHEME};
         let bytes = pl.state().iroh_secret().await;
         let key = SecretKey::from_bytes(&bytes);
-        let address = Address::new(IROH_SCHEME, key.public().to_string());
+        let address = Address::new(IROH_SCHEME, key.public().to_vec());
         addrs.insert(address);
     }
 

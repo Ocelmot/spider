@@ -8,7 +8,11 @@ use crate::{
 };
 use base64::{engine::general_purpose, Engine};
 use rsa::{
-    RsaPrivateKey, pkcs1v15::{DecryptingKey, EncryptingKey, Signature, SigningKey, VerifyingKey}, pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey}, signature::{DigestSigner, DigestVerifier, SignatureEncoding, Signer, Verifier}, traits::{RandomizedDecryptor, RandomizedEncryptor}
+    pkcs1v15::{DecryptingKey, EncryptingKey, Signature, SigningKey, VerifyingKey},
+    pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey},
+    signature::{DigestSigner, DigestVerifier, SignatureEncoding, Signer, Verifier},
+    traits::{RandomizedDecryptor, RandomizedEncryptor},
+    RsaPrivateKey,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -206,13 +210,40 @@ impl Relation {
     /// Deserialize this Relation
     pub fn deserialize(data: &mut VecDeque<u8>) -> LinkResult<Self> {
         // Deserialize role
-        let role = data.pop_front().wrap_problem_msg(ErrorKind::Deserialization, "Failed to deserialize Role")?;
+        let role = data
+            .pop_front()
+            .wrap_problem_msg(ErrorKind::Deserialization, "Failed to deserialize Role")?;
         let role = Role::deserialize(role)?;
 
         // Deserialize key
         let mut bytes = [0u8; 294];
-        data.read_exact(&mut bytes).wrap_problem_msg(ErrorKind::Deserialization, "Failed to deserialize key")?;
+        data.read_exact(&mut bytes)
+            .wrap_problem_msg(ErrorKind::Deserialization, "Failed to deserialize key")?;
         let id = SpiderId::from_bytes(bytes);
+        Ok(Relation { role, id })
+    }
+
+    /// Serialize this Relation producing the minimal number of bytes
+    pub fn to_minimal_bytes(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(self.role.serialize());
+        data.extend_from_slice(self.id.to_minimal_bytes());
+        data
+    }
+
+    /// Deserialize this Relation from the minimal form
+    pub fn from_minimal_bytes(data: &[u8]) -> LinkResult<Self> {
+        // Deserialize role
+        let (role, id_bytes) = data
+            .split_at_checked(1)
+            .wrap_problem_msg(ErrorKind::Deserialization, "Failed to deserialize Role")?;
+        let role = Role::deserialize(role[0])?;
+
+        // Deserialize key
+        let bytes: [u8; 256] = id_bytes
+            .try_into()
+            .wrap_problem_msg(ErrorKind::Deserialization, format!("Failed to deserialize key, data len {}", data.len()))?;
+        let id = SpiderId::from_minimal_bytes(&bytes);
         Ok(Relation { role, id })
     }
 }
@@ -361,6 +392,9 @@ impl SelfRelation {
 #[cfg(test)]
 mod tests {
 
+    use tracing::info;
+    use tracing_test::traced_test;
+
     use super::*;
 
     #[test]
@@ -386,5 +420,18 @@ mod tests {
             let msg = x.to_string();
             self_rel.sign(msg.as_bytes());
         }
+    }
+
+    // Test the relation's roundtrip
+    #[test]
+    #[traced_test]
+    fn minimal_id_round_trip() {
+        let rel = SelfRelation::debug_get(5).relation;
+
+        let serialized = rel.to_minimal_bytes();
+        info!("serialized: {:?}", serialized);
+        let deserialized = Relation::from_minimal_bytes(&serialized).unwrap();
+
+        assert_eq!(rel, deserialized);
     }
 }

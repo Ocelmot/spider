@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use tracing::{info, trace};
+use tracing::trace;
 use spider_link::{ Relation, SelfRelation, link_set::{LinkSet, LinkSetMessage, impls::authenticated::Authenticated, links::PinnedLink}, message::{Message, RouterMessage, UiMessage}};
 use tokio::{
     select, spawn,

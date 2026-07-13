@@ -147,9 +147,62 @@ impl<const BYTE_SIZE: usize> Ord for SpiderId<BYTE_SIZE> {
 }
 
 impl SpiderId<294> {
+    const DER_PREFIX: [u8; 33] = [
+        0x30, 0x82, 0x01, 0x22, 0x30, 0x0D, 0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01,
+        0x01, 0x01, 0x05, 0x00, 0x03, 0x82, 0x01, 0x0F, 0x00, 0x30, 0x82, 0x01, 0x0A, 0x02, 0x82,
+        0x01, 0x01, 0x00,
+    ];
+    const DER_SUFFIX: [u8; 5] = [0x02, 0x03, 0x01, 0x00, 0x01];
+
     /// Generate a SpiderId from a 2048 bit RsaPublicKey
     pub fn from_key(key: RsaPublicKey) -> Self {
         let pub_bytes = key.to_public_key_der().unwrap();
         SpiderId::from_bytes(pub_bytes.as_ref().try_into().unwrap())
+    }
+
+    /// Restores the SpiderId from its minimal byte form.
+    /// 
+    /// The modulus is re-prefixed and suffixed to create the key
+    pub fn from_minimal_bytes(bytes: &[u8; 256]) -> Self {
+        let mut built_bytes = [0u8; _];
+
+        built_bytes[..33].copy_from_slice(&Self::DER_PREFIX);
+        built_bytes[33..289].copy_from_slice(bytes);
+        built_bytes[289..].copy_from_slice(&Self::DER_SUFFIX);
+
+        Self { bytes: built_bytes }
+    }
+
+    /// Make a SpiderId from a minimal array of bytes.
+    /// 
+    /// Takes only the modulus of the key for serialization
+    pub fn to_minimal_bytes(&self) -> &[u8; 256] {
+        let bytes = self.bytes.get(33..33 + 256).expect("BYTE_SIZE == 294");
+        bytes.try_into().unwrap()
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+
+    use tracing::info;
+    use tracing_test::traced_test;
+
+    use crate::SelfRelation;
+
+    use super::*;
+
+    // Test the id's roundtrip
+    #[test]
+    #[traced_test]
+    fn minimal_id_round_trip() {
+        let id = SelfRelation::debug_get(5).relation.id;
+
+        let serialized = id.to_minimal_bytes();
+        info!("serialized: {:?}", serialized);
+        let deserialized = SpiderId::from_minimal_bytes(serialized);
+
+        assert_eq!(id, deserialized);
     }
 }

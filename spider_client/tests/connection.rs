@@ -6,7 +6,7 @@ use spider_client::{
          message::{DatasetData, Message, RouterMessage}, SelfRelation
     }, ClientResponse, SpiderClientBuilder
 };
-use spider_link::{beacon::start_beacon_listen_handler, link_set::{Epoch, LinkSet, LinkSetMessage, links::Address}, transports::{LinkListener, tcp::TcpListener}, };
+use spider_link::{beacon::start_beacon_listen_handler, link_set::{Epoch, LinkSet, LinkSetMessage, links::Address}, transports::{LinkListener, tcp::{TCP_SCHEME, TcpListener}}, };
 use tokio::sync::{Mutex, mpsc::channel};
 use tracing::info;
 use tracing_test::traced_test;
@@ -22,13 +22,14 @@ async fn connect() {
     let listen_addr = "127.0.0.1:1950";
     info!("Starting listener");
     let listener = TcpListener::new(listen_addr.to_string(), Arc::new(Mutex::new(None)));
-    let (listen_tx, mut listen_rx) = channel(10); 
+    let (listen_tx, mut listen_rx) = channel(10);
     listener.listen(host_relation.clone(), listen_tx.clone());
 
     let mut client_builder = SpiderClientBuilder::new_with_self_relation(Some("".into()), client_relation.clone());
     client_builder.enable_beacon(false);
     client_builder.disable_veilid();
-    client_builder.set_fixed_addrs(vec![Address::new("auth_tcp", listen_addr)]);
+    client_builder.enable_transport(TCP_SCHEME.to_owned());
+    client_builder.set_fixed_addrs(vec![Address::new(TCP_SCHEME, listen_addr)]);
     client_builder.enable_fixed_addrs(true);
     client_builder.set_host_relation(host_relation.relation.clone());
     info!("Starting client");
@@ -65,7 +66,6 @@ async fn connect() {
     
     assert_eq!(name, event_name);
     assert_eq!(rel, event_rel);
-    // assert_eq!(data, event_data);
 }
 
 
@@ -87,6 +87,7 @@ async fn beacon_connect() {
     let mut client_builder = SpiderClientBuilder::new_with_self_relation(Some("".into()), client_relation.clone());
     client_builder.enable_beacon(true);
     client_builder.disable_veilid();
+    client_builder.enable_transport(TCP_SCHEME.to_owned());
     client_builder.enable_fixed_addrs(false);
     client_builder.set_host_relation(host_relation.relation.clone());
     info!("Starting client");
@@ -123,7 +124,6 @@ async fn beacon_connect() {
     
     assert_eq!(name, event_name);
     assert_eq!(rel, event_rel);
-    // assert_eq!(data, event_data);
 }
 
 
@@ -143,7 +143,8 @@ async fn client_round_trip() {
     let mut client_builder = SpiderClientBuilder::new_with_self_relation(Some("".into()), client_relation.clone());
     client_builder.enable_beacon(false);
     client_builder.disable_veilid();
-    client_builder.set_fixed_addrs(vec![Address::new("auth_tcp", listen_addr)]);
+    client_builder.enable_transport(TCP_SCHEME.to_owned());
+    client_builder.set_fixed_addrs(vec![Address::new(TCP_SCHEME, listen_addr)]);
     client_builder.enable_fixed_addrs(true);
     client_builder.set_host_relation(host_relation.relation.clone());
     info!("Starting client");
@@ -208,8 +209,4 @@ async fn client_round_trip() {
     
     assert_eq!(name, event2_name);
     assert_eq!(rel, event2_rel);
-
-
-
-
 }
