@@ -14,6 +14,7 @@ pub enum RouterProcessorMessage {
     Connected(Relation, Epoch),
     UnapprovedMessage(Relation, Message),
     Disconnected(Relation),
+    LinkReaderClosed(Relation),
 
     SendMessage(Relation, Message),
     MulticastMessage(Vec<Relation>, Message),

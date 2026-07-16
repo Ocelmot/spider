@@ -4,8 +4,11 @@ use std::{
     time::Duration,
 };
 
-use tracing::trace;
-use spider_link::{ Relation, SelfRelation, link_set::{LinkSet, LinkSetMessage, impls::authenticated::Authenticated, links::PinnedLink}, message::{Message, RouterMessage, UiMessage}};
+use spider_link::{
+    link_set::{impls::authenticated::Authenticated, links::PinnedLink, LinkSet, LinkSetMessage},
+    message::{Message, RouterMessage, UiMessage},
+    Relation,
+};
 use tokio::{
     select, spawn,
     sync::{
@@ -14,8 +17,12 @@ use tokio::{
     },
     time::Instant,
 };
+use tracing::trace;
 
-use crate::processor::{link::ProcessorLink, message::ProcessorMessage, ui::UiProcessorMessage};
+use crate::{
+    error::{ProblemWrap, SpiderResult},
+    processor::{link::ProcessorLink, message::ProcessorMessage, ui::UiProcessorMessage},
+};
 
 use super::RouterProcessorMessage;
 
@@ -49,79 +56,101 @@ impl PendingManager {
         self.ui_permits.add_permits(1);
     }
 
-    pub async fn add_approval_code(&mut self, code: String) {
+    pub async fn add_approval_code(&mut self, code: String) -> SpiderResult {
         trace!("Adding approval code {}", code);
         for (_, pending) in &self.pending_connections {
-            pending.send(PendingLinkControl::AddCode(code.clone())).await;
+            // Make sure to try sending to all, even if one errors.
+            let _ = pending
+                .send(PendingLinkControl::AddCode(code.clone()))
+                .await;
         }
 
         let timeout = Instant::now() + CODE_TIMEOUT;
         self.approval_codes.insert(code, timeout);
+        Ok(())
     }
 
-    pub async fn revoke_approval_code(&mut self, code: String) {
+    pub async fn revoke_approval_code(&mut self, code: String) -> SpiderResult {
         for (_, pending) in &self.pending_connections {
-            pending.send(PendingLinkControl::RevokeCode(code.clone())).await;
+            // Make sure to try sending to all, even if one errors.
+            let _ = pending
+                .send(PendingLinkControl::RevokeCode(code.clone()))
+                .await;
         }
 
         self.approval_codes.remove(&code);
+        Ok(())
     }
 
-    pub async fn add_link(&mut self, link: Authenticated) {
+    pub async fn add_link(&mut self, link: Authenticated) -> SpiderResult {
         let (rel, link) = link.into_parts();
         if let Some(pending) = self.pending_connections.get(&rel) {
             trace!("Pending link set existed, adding link");
-            pending.send(PendingLinkControl::AddLink(link)).await;
+            pending
+                .send(PendingLinkControl::AddLink(link))
+                .await
+                .wrap()?;
         } else {
             trace!("Creating new pending link set");
             let sender = self.sender.clone();
-            let self_rel = self.pl.state().self_relation().await;
             let ui_permits = self.ui_permits.clone();
-            let pending = create_pending_link(sender, self_rel, rel.clone(), ui_permits);
+            let pending = create_pending_link(sender, rel.clone(), ui_permits)?;
 
-            trace!("Approval codes has {} active codes", self.approval_codes.len());
+            trace!(
+                "Approval codes has {} active codes",
+                self.approval_codes.len()
+            );
             for (code, _) in &self.approval_codes {
-                trace!("Adding approval code {}", code );
-                pending.send(PendingLinkControl::AddCode(code.clone())).await;
+                trace!("Adding approval code {}", code);
+                pending
+                    .send(PendingLinkControl::AddCode(code.clone()))
+                    .await
+                    .wrap()?;
             }
 
-            pending.send(PendingLinkControl::AddLink(link)).await;
+            pending
+                .send(PendingLinkControl::AddLink(link))
+                .await
+                .wrap()?;
 
-            add_pending_ui_setting(&self.pl, &rel).await;
+            add_pending_ui_setting(&self.pl, &rel).await?;
             self.pending_connections.insert(rel, pending);
         }
+        Ok(())
     }
 
-    pub async fn approve_connection(&mut self, rel: &Relation) {
+    pub async fn approve_connection(&mut self, rel: &Relation) -> SpiderResult {
         if let Some(pending) = self.pending_connections.remove(rel) {
-            pending.send(PendingLinkControl::Approve).await;
+            // If there is nothing to send to, remove the ui setting anyway.
+            let _ = pending.send(PendingLinkControl::Approve).await;
         }
-        remove_pending_ui_setting(&self.pl, rel).await;
+        remove_pending_ui_setting(&self.pl, rel).await
     }
-    
 
-    pub async fn deny_connection(&mut self, rel: &Relation) {
+    pub async fn deny_connection(&mut self, rel: &Relation) -> SpiderResult {
         if let Some(pending) = self.pending_connections.remove(rel) {
-            pending.send(PendingLinkControl::Deny).await;
+            // If there is nothing to send to, remove the ui setting anyway.
+            let _ = pending.send(PendingLinkControl::Deny).await;
         }
-        remove_pending_ui_setting(&self.pl, rel).await;
+        remove_pending_ui_setting(&self.pl, rel).await
     }
 
-    pub(super) async fn remove_connection(&mut self, rel: &Relation){
+    pub(super) async fn remove_connection(&mut self, rel: &Relation) -> SpiderResult {
         self.pending_connections.remove(rel);
-        remove_pending_ui_setting(&self.pl, rel).await;
+        remove_pending_ui_setting(&self.pl, rel).await
     }
 
     pub fn upkeep(&mut self) {
         // Clean approval codes
-        self.approval_codes.retain(|_, timeout| timeout >= &mut Instant::now());
+        self.approval_codes
+            .retain(|_, timeout| timeout >= &mut Instant::now());
     }
 }
 
 // Ui Helper functions
 
-async fn add_pending_ui_setting(pl: &ProcessorLink, rel: &Relation) {
-    let sig= rel.sig();
+async fn add_pending_ui_setting(pl: &ProcessorLink, rel: &Relation) -> SpiderResult {
+    let sig = rel.sig();
     let title = format!("{:?}: {}", rel.role, sig);
     let msg = UiProcessorMessage::SetSetting {
         header: String::from("Pending Connections"),
@@ -133,7 +162,7 @@ async fn add_pending_ui_setting(pl: &ProcessorLink, rel: &Relation) {
         cb: |e| {
             if e.index() == 0 {
                 // Approve
-                if let Some(rel) = Relation::from_base64(e.data()){
+                if let Some(rel) = Relation::from_base64(e.data()) {
                     let msg = RouterProcessorMessage::ApproveConnection(rel);
                     return Some(ProcessorMessage::RouterMessage(msg));
                 }
@@ -149,17 +178,17 @@ async fn add_pending_ui_setting(pl: &ProcessorLink, rel: &Relation) {
         },
         data: rel.to_base64(),
     };
-    pl.send_ui(msg).await;
+    pl.send_ui(msg).await
 }
 
-pub async fn remove_pending_ui_setting(pl: &ProcessorLink, rel: &Relation) {
+pub async fn remove_pending_ui_setting(pl: &ProcessorLink, rel: &Relation) -> SpiderResult {
     let sig = rel.sig();
     let title = format!("{:?}: {}", rel.role, sig);
     let msg = UiProcessorMessage::RemoveSetting {
         header: String::from("Pending Connections"),
         title,
     };
-    pl.send_ui(msg).await;
+    pl.send_ui(msg).await
 }
 
 // Pending Link Processor functions
@@ -172,14 +201,19 @@ pub enum PendingLinkControl {
     AddLink(Box<dyn PinnedLink>),
 }
 
-
-
-fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRelation, rel: Relation, ui_permits: Arc<Semaphore>) -> Sender<PendingLinkControl> {
+fn create_pending_link(
+    sender: Sender<RouterProcessorMessage>,
+    rel: Relation,
+    ui_permits: Arc<Semaphore>,
+) -> SpiderResult<Sender<PendingLinkControl>> {
     let (ctrl_tx, mut ctrl_rx) = channel(50);
-    
+
     spawn(async move {
         let mut link_set = LinkSet::<Message>::new();
-        link_set.set_grace_period_timeout(Some(Duration::from_secs(30))).await;
+        link_set
+            .set_grace_period_timeout(Some(Duration::from_secs(30)))
+            .await
+            .wrap()?;
 
         let mut backlog = Vec::new();
         let mut codes = HashSet::new();
@@ -194,8 +228,8 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                     match msg {
                         PendingLinkControl::Approve => {
                             let msg = RouterProcessorMessage::ApprovedConnection(rel.clone(), backlog, link_set);
-                            sender.send(msg).await;
-                            return;
+                            sender.send(msg).await.wrap()?;
+                            return Ok(());
                         },
                         PendingLinkControl::Deny => break,
                         PendingLinkControl::AddCode(code) => {
@@ -205,8 +239,8 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                                 if code == *recvd_code {
                                     trace!("Matched");
                                     let msg = RouterProcessorMessage::ApprovedConnection(rel.clone(), backlog, link_set);
-                                    sender.send(msg).await;
-                                    return; 
+                                    sender.send(msg).await.wrap()?;
+                                    return Ok(());
                                 }else{
                                     trace!("didn't match");
                                 }
@@ -218,7 +252,7 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                         }
                         PendingLinkControl::AddLink(link) => {
                             trace!("Pending adding new link");
-                            link_set.add_link_boxed(link).await;
+                            link_set.add_link_boxed(link).await.wrap()?;
                         },
                     }
 
@@ -229,7 +263,7 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                     match msg {
                         LinkSetMessage::Disconnected => break,
                         LinkSetMessage::Connected(_) => {
-                            link_set.send(Message::Router(RouterMessage::Pending)).await;
+                            link_set.send(Message::Router(RouterMessage::Pending)).await.wrap()?;
                         },
                         LinkSetMessage::AttemptingConnection(_) => {} // Base's link sets do not have a way to acquire more addresses.
                         LinkSetMessage::Message(message, epoch) => {
@@ -240,8 +274,8 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                                 if codes.contains(new_code) {
                                     trace!("Matched code, sending ApprovedConnection");
                                     let msg = RouterProcessorMessage::ApprovedConnection(rel.clone(), backlog, link_set);
-                                    sender.send(msg).await;
-                                    return;
+                                    sender.send(msg).await.wrap()?;
+                                    return Ok(());
                                 }else{
                                     trace!("Mismatched code");
                                     recvd_code = Some(new_code.clone());
@@ -262,9 +296,9 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                                         // message, accept this connection
                                         backlog.push((message, epoch));
                                         let msg = RouterProcessorMessage::ApprovedConnection(rel.clone(), backlog, link_set);
-                                        sender.send(msg).await;
+                                        sender.send(msg).await.wrap()?;
                                         permit.forget();
-                                        return;
+                                        return Ok(());
                                     },
                                     Err(_) => {
                                         // couldn't get permit now, try later
@@ -283,15 +317,18 @@ fn create_pending_link(sender: Sender<RouterProcessorMessage>, self_rel: SelfRel
                 },
                 Ok(permit) = ui_permits.acquire(), if recvd_ui_sub && !ui_permits.is_closed() => {
                     let msg = RouterProcessorMessage::ApprovedConnection(rel.clone(), backlog, link_set);
-                    sender.send(msg).await;
+                    sender.send(msg).await.wrap()?;
                     permit.forget();
-                    return;
+                    return Ok(());
                 }
             }
         }
         // if we break from the loop, assume that the link should be denied
-        sender.send(RouterProcessorMessage::DenyConnection(rel.clone())).await;
+        sender
+            .send(RouterProcessorMessage::DenyConnection(rel.clone()))
+            .await
+            .wrap()
     });
 
-    ctrl_tx
+    Ok(ctrl_tx)
 }

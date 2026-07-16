@@ -106,12 +106,14 @@ impl<T> ProblemWrap<T> for Option<T> {
 /// Indicate the type of the [SpiderError] encountered
 #[derive(Debug, PartialEq, Eq)]
 pub enum ErrorKind {
-    /// The Spider has closed
-    Closed,
+    /// The Spider has stopped, and will shutdown
+    Stopped,
     /// There was a problem deserializing some data
     Deserialization,
-    /// The receiver has already been taken out of here!
-    Taken,
+    
+    /// Encountered an error in the router processor
+    RouterError,
+
     /// Authentication failure
     Authentication,
     /// Other problems

@@ -13,7 +13,7 @@ impl RouterProcessorState{
         // Send to subscribers
         let recipients = self.event_to_subscribers(&name, &from, &data).await;
         // send to externals
-        for external in externals{
+        for external in &externals{
             if recipients.contains(&external){
                 continue; // this recipient already received message via subscription
             }
@@ -42,18 +42,30 @@ impl RouterProcessorState{
     /// was sent.
     async fn event_to_subscribers(&mut self, name: &String, from: &Relation, data: &DatasetData) -> HashSet<Relation>{
         let mut recipients = HashSet::new();
-        if let Some(subscriber_set) = self.event_subscribers.get(name){
-            for subscriber in subscriber_set{
+        if let Some(subscriber_set) = self.event_subscribers.get_mut(name){
+            let mut expired = HashSet::new();
+            for subscriber in subscriber_set.iter(){
                 // Check if source is external and dest is external, skip
                 if from.is_peer() && subscriber.is_peer(){
                     continue;
                 }
-                if let Some(link) = self.links.get_mut(subscriber){
-                    recipients.insert(subscriber.clone());
-                    let router_msg = RouterMessage::Event(name.clone(), from.clone(), data.clone());
-                    let msg = Message::Router(router_msg);
-                    link.send(msg).await;
+                
+                match self.links.get_mut(subscriber) {
+                    Some(link) => {
+                        recipients.insert(subscriber.clone());
+                        let router_msg = RouterMessage::Event(name.clone(), from.clone(), data.clone());
+                        let msg = Message::Router(router_msg);
+                        if link.send(msg).await.is_err() {
+                            expired.insert(subscriber.clone());
+                        }
+                    }
+                    None => {
+                        expired.insert(subscriber.clone());
+                    },
                 }
+            }
+            for exp in expired {
+                subscriber_set.remove(&exp);
             }
         }
         recipients

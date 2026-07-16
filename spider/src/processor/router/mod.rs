@@ -8,14 +8,9 @@ use std::{
 use directory::Directory;
 use pending::PendingManager;
 use spider_link::{
-    link_set::{
-        impls::authenticated::Authenticated,
-        links::Address,
-        Epoch, LinkSet, LinkSetMessage,
-    },
-    message::{Invite, Message, RouterMessage},
-    transports::{iroh::IrohHub, LinkListener},
-    Relation,
+    Relation, link_set::{
+        Epoch, LinkSet, LinkSetError, LinkSetMessage, impls::authenticated::Authenticated, links::Address,
+    }, message::{Invite, Message, RouterMessage}, transports::{LinkListener, iroh::IrohHub},
 };
 use tokio::{
     fs::remove_file,
@@ -28,16 +23,12 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-use rand::{
-    Rng, SeedableRng, distributions::Standard, rngs::StdRng, seq::SliceRandom, thread_rng,
-};
+use rand::{distributions::Standard, rngs::StdRng, seq::SliceRandom, thread_rng, Rng, SeedableRng};
 use tracing::trace;
 
 use network_interface::NetworkInterfaceConfig;
 
-use crate::{
-    error::{ProblemWrap, SpiderError, SpiderResult}
-};
+use crate::error::{ErrorKind, ProblemWrap, SpiderError, SpiderResult};
 
 use super::{link::ProcessorLink, message::ProcessorMessage, ui::UiProcessorMessage};
 
@@ -154,7 +145,6 @@ impl RouterProcessorState {
 
             hub
         };
-        
 
         Ok(Self {
             pl,
@@ -183,32 +173,39 @@ impl RouterProcessorState {
         let handle = tokio::spawn(async move {
             self.init_ui().await;
             loop {
-                select! {
+                let result = select! {
                     Some(link) = self.listeners.recv(), if !self.listeners.is_closed() => {
                         trace!("RouterProcessor got new link");
                         match self.directory.is_link_approved(link.relation()) {
                             directory::LinkApproval::Blocked => {
                                 // do nothing, close the link
-                                trace!("Link blocked")
+                                trace!("Link blocked");
+                                Ok(())
                             },
                             directory::LinkApproval::Unknown => {
                                 // add link to pending
                                 trace!("Link Unknown");
-                                self.pending.add_link(link).await;
+                                self.pending.add_link(link).await
                             },
                             directory::LinkApproval::Allowed => {
                                 // insert into existing link set, or create new
                                 // link set.
                                 trace!("Link allowed");
-                                self.insert_link(link).await;
+                                self.insert_link(link).await
                             },
                         }
                     }
                     msg = self.receiver.recv() => {
-                        let Some(msg) = msg else {break};
+                        let Some(msg) = msg else {
+                            info!("Router processor recv channel closed, quitting...");
+                            break
+                        };
 
-                        self.process_message(msg).await;
+                        self.process_message(msg).await
                     }
+                };
+                if let Err(error) = result {
+                    warn!("Router processor encountered error: {}", error);
                 }
             }
         });
@@ -236,18 +233,65 @@ impl RouterProcessorState {
             },
             data: String::new(),
         };
-        self.pl.send_ui(msg).await;
+        self.pl
+            .send_ui(msg)
+            .await
+            .expect("should be able to set setting");
+    }
+
+    async fn initialize_link_set(
+        &self,
+        link_set: &mut LinkSet<Message>,
+        rel: &Relation,
+    ) -> SpiderResult {
+        let self_rel = self.pl.state().self_relation().await;
+        trace!("");
+
+        // add known addrs
+        if let Some(entry) = self.directory.get_entry(&rel) {
+            for addr in entry.addrs().iter() {
+                link_set.add_addr(addr.clone()).await.wrap()?;
+            }
+        }
+
+        // add tcp link capability
+        #[cfg(feature = "transport_tcp")]
+        link_set
+            .add_connector(spider_link::transports::tcp::TcpConnector::new(
+                self_rel.clone(),
+                rel.clone(),
+            ))
+            .await
+            .wrap()?;
+
+        #[cfg(feature = "transport_iroh")]
+        link_set
+            .add_connector(spider_link::transports::iroh::IrohConnector::new(
+                self_rel.clone(),
+                rel.clone(),
+                self.iroh_hub.endpoint().clone(),
+            ))
+            .await
+            .wrap()?;
+
+        Ok(())
     }
 
     async fn insert_link(&mut self, link: Authenticated) -> SpiderResult {
         let (rel, link) = link.into_parts();
+
+        if self.links.get(&rel).is_some_and(|ls| ls.is_terminated()) {
+            self.links.remove(&rel);
+        }
+
         match self.links.get_mut(&rel) {
             Some(link_set) => link_set.add_link_boxed(link).await.wrap(),
             None => {
-                let mut link_set = self.create_link_set(rel.clone()).await?;
-                link_set.add_link_boxed(link).await;
+                let mut link_set = LinkSet::new();
+                self.initialize_link_set(&mut link_set, &rel).await?;
+                link_set.add_link_boxed(link).await.wrap()?;
 
-                create_link_set_recv_task(rel.clone(), &mut link_set, self.sender.clone());
+                create_link_set_recv_task(rel.clone(), &mut link_set, self.sender.clone())?;
 
                 self.links.insert(rel, link_set);
 
@@ -256,25 +300,106 @@ impl RouterProcessorState {
         }
     }
 
+    async fn get_or_make_link_set(
+        &mut self,
+        rel: &Relation,
+    ) -> SpiderResult<&mut LinkSet<Message>> {
+        if self.links.get(rel).is_some_and(|ls| ls.is_terminated()) {
+            self.links.remove(rel);
+        }
+
+        if !self.links.contains_key(rel) {
+            let has_addrs = self
+                .directory
+                .get_entry(rel)
+                .is_some_and(|de| !de.addrs().is_empty());
+            if has_addrs {
+                trace!("Creating link set for {:?}", rel.sig());
+                let mut link_set = LinkSet::new();
+                self.initialize_link_set(&mut link_set, rel).await?;
+                create_link_set_recv_task(rel.clone(), &mut link_set, self.sender.clone())?;
+                self.links.insert(rel.clone(), link_set);
+            } else {
+                trace!("No addresses for {:?}", rel.sig());
+            }
+        }
+        self.links.get_mut(rel).ok_or(
+            SpiderError::new()
+                .problem(ErrorKind::RouterError)
+                .msg("Failed to get link set"),
+        )
+    }
+
+    /// Send a message to a connected relation
+    async fn send_msg(&mut self, rel: &Relation, msg: Message) -> SpiderResult {
+        trace!("Sending message: {:?} to relation {:?}", msg, rel);
+
+        let link_set = self.get_or_make_link_set(&rel).await?;
+        link_set
+            .send(msg)
+            .await
+            .wrap_problem(ErrorKind::RouterError)
+    }
+
+    /// Sends a message once for each of the given relations
+    async fn multicast_msg(&mut self, rels: Vec<Relation>, msg: Message) -> SpiderResult {
+        for relation in &rels {
+            let _ = self.send_msg(relation, msg.clone()).await;
+        }
+        Ok(())
+    }
+
+    async fn somecast_msg(&mut self, relations: Vec<Relation>, min: usize, msg: Message) {
+        let mut active = Vec::new();
+        let mut disconnected = Vec::new();
+        for rel in relations {
+            if self.links.get(&rel).is_some_and(|l| l.is_active()) {
+                active.push(rel);
+            } else {
+                disconnected.push(rel)
+            }
+        }
+        let mut rng = StdRng::from_rng(rand::thread_rng()).unwrap();
+        if active.len() >= min {
+            for receiver in active.choose_multiple(&mut rng, min) {
+                if let Some(link) = self.links.get_mut(receiver) {
+                    let _ = link.send(msg.clone()).await;
+                }
+            }
+        } else {
+            let disconnected_count = min - active.len();
+            for rel in active {
+                if let Some(link) = self.links.get_mut(&rel) {
+                    let _ = link.send(msg.clone()).await;
+                }
+            }
+            for receiver in disconnected.choose_multiple(&mut rng, disconnected_count) {
+                if let Ok(link) = self.get_or_make_link_set(receiver).await {
+                    let _ = link.send(msg.clone()).await;
+                }
+            }
+        }
+    }
+
     async fn process_message(&mut self, msg: RouterProcessorMessage) -> SpiderResult {
         match msg {
             RouterProcessorMessage::PeripheralMessage(rel, msg) => {
-                self.process_remote_message(rel, msg).await;
+                self.process_remote_message(rel, msg).await?;
             }
 
             // ===== Pending connection operations =====
             RouterProcessorMessage::ApproveConnection(relation) => {
-                self.pending.approve_connection(&relation).await;
+                self.pending.approve_connection(&relation).await?;
             }
             RouterProcessorMessage::DenyConnection(relation) => {
-                self.pending.deny_connection(&relation).await;
+                self.pending.deny_connection(&relation).await?;
             }
             RouterProcessorMessage::AddApprovalCode(code) => {
-                self.pending.add_approval_code(code).await;
+                self.pending.add_approval_code(code).await?;
             }
             RouterProcessorMessage::ApprovedConnection(rel, backlog, link_set) => {
-                self.approved_connection_handler(rel, backlog, link_set)
-                    .await;
+                self.handle_approved_connection(rel, backlog, link_set)
+                    .await?;
             }
 
             RouterProcessorMessage::Connected(rel, epoch) => {
@@ -302,13 +427,18 @@ impl RouterProcessorState {
                 }
             }
             RouterProcessorMessage::Disconnected(_rel) => {}
+            RouterProcessorMessage::LinkReaderClosed(rel) => {
+                if self.links.get(&rel).is_some_and(|ls|ls.is_terminated()) {
+                    self.links.remove(&rel);
+                }
+            }
 
             // ===== Message sending operations =====
             RouterProcessorMessage::SendMessage(rel, msg) => {
-                self.send_msg(rel, msg).await;
+                self.send_msg(&rel, msg).await?;
             }
             RouterProcessorMessage::MulticastMessage(rels, msg) => {
-                self.multicast_msg(rels, msg).await;
+                self.multicast_msg(rels, msg).await?;
             }
             RouterProcessorMessage::SomecastMessage(rels, min, msg) => {
                 self.somecast_msg(rels, min, msg).await;
@@ -345,13 +475,17 @@ impl RouterProcessorState {
                     },
                     data: String::new(),
                 };
-                self.pl.send_ui(msg).await;
+                self.pl.send_ui(msg).await?;
 
                 // message name on existing channels
-                for (_, link) in &self.links {
+                let connected_links = self
+                    .links
+                    .iter()
+                    .filter(|(_, ls)| ls.current_epoch().is_some());
+                for (_, link) in connected_links {
                     let msg = RouterMessage::SetIdentityProperty("name".into(), name.clone());
                     let msg = Message::Router(msg);
-                    link.send(msg).await;
+                    let _ = link.send(msg).await;
                 }
             }
             RouterProcessorMessage::SetNickname(rel, name) => {
@@ -367,7 +501,7 @@ impl RouterProcessorState {
             }
 
             RouterProcessorMessage::RevokeInvite(invite_id) => {
-                self.handle_revoke_invite(invite_id).await;
+                self.handle_revoke_invite(invite_id).await?;
             }
 
             RouterProcessorMessage::Upkeep => {
@@ -381,7 +515,7 @@ impl RouterProcessorState {
         Ok(())
     }
 
-    async fn process_remote_message(&mut self, rel: Relation, msg: RouterMessage) {
+    async fn process_remote_message(&mut self, rel: Relation, msg: RouterMessage) -> SpiderResult {
         match msg {
             // Authorization messages
             RouterMessage::Pending => {} // base sends this, not recv
@@ -392,6 +526,12 @@ impl RouterProcessorState {
             RouterMessage::Approved => {} // base sends this, not recv
             RouterMessage::Denied => {}   // base sends this, not recv
             RouterMessage::Addrs(addrs) => {
+                if let Some(link_set) = self.links.get(&rel) {
+                    for addr in &addrs {
+                        let _ = link_set.add_addr(addr.clone()).await;
+                    }
+                }
+
                 self.directory
                     .modify_or_insert_entry(&rel, |entry| {
                         let mut new_set = HashSet::new();
@@ -413,7 +553,7 @@ impl RouterProcessorState {
             }
             RouterMessage::Subscribe(name) => {
                 if rel.is_peer() {
-                    return; // don't allow subscriptions from peers (at least for now)
+                    return Ok(()); // don't allow subscriptions from peers (at least for now)
                 }
                 let entry = self.event_subscribers.entry(name);
                 let subscriber_set = entry.or_default();
@@ -421,7 +561,7 @@ impl RouterProcessorState {
             }
             RouterMessage::Unsubscribe(name) => {
                 if rel.is_peer() {
-                    return; // don't allow subscriptions from peers (at least for now)
+                    return Ok(()); // don't allow subscriptions from peers (at least for now)
                 }
                 match self.event_subscribers.get_mut(&name) {
                     Some(subscriber_set) => {
@@ -453,30 +593,34 @@ impl RouterProcessorState {
 
             // Invite Messages
             RouterMessage::Invite(invite) => {
-                self.handle_invite(invite).await;
+                self.handle_invite(invite).await?;
             }
             RouterMessage::GenerateInvite => {
-                self.handle_generate_invite(Some(rel)).await;
+                self.handle_generate_invite(Some(rel)).await?;
             }
-        }
+        };
+        Ok(())
     }
 
-    async fn approved_connection_handler(
+    async fn handle_approved_connection(
         &mut self,
         relation: Relation,
         backlog: Vec<(Message, Epoch)>,
         mut link_set: LinkSet<Message>,
-    ) {
+    ) -> SpiderResult {
         info!("Connection Approved");
         // remove the pending connection, and update the ui
-        self.pending.remove_connection(&relation).await;
+        self.pending.remove_connection(&relation).await?;
 
         // Inform other side that the connection is approved.
         let msg = Message::Router(RouterMessage::Approved);
-        link_set.send(msg).await;
+        link_set
+            .send(msg)
+            .await
+            .wrap_problem_msg(ErrorKind::RouterError, "Link disconnected during approval")?;
 
         // add link relation to directory
-        self.directory.add_identity(&relation).await;
+        self.directory.add_identity(&relation).await?;
 
         // send backlogged messages
         for (msg, _epoch) in backlog {
@@ -485,107 +629,38 @@ impl RouterProcessorState {
                     relation.clone(),
                     msg,
                 ))
-                .await;
+                .await
+                .wrap_problem_msg(ErrorKind::RouterError, "Link disconnected during approval")?;
         }
 
-        create_link_set_recv_task(relation.clone(), &mut link_set, self.sender.clone());
+        self.initialize_link_set(&mut link_set, &relation).await?;
+        create_link_set_recv_task(relation.clone(), &mut link_set, self.sender.clone())?;
 
         // Send Name
         let msg =
             RouterMessage::SetIdentityProperty("name".into(), self.pl.state().name().await.clone());
-        link_set.send(Message::Router(msg)).await;
+        link_set
+            .send(Message::Router(msg))
+            .await
+            .wrap_problem_msg(ErrorKind::RouterError, "Link disconnected during approval")?;
 
         // Send Addrs
         let addrs = get_addrs(&self.pl).await;
         let msg = RouterMessage::Addrs(addrs);
-        link_set.send(Message::Router(msg)).await;
+        link_set
+            .send(Message::Router(msg))
+            .await
+            .wrap_problem_msg(ErrorKind::RouterError, "Link disconnected during approval")?;
 
         // add link to structures
         self.links.insert(relation, link_set);
-    }
-
-    async fn send_msg(&mut self, rel: Relation, msg: Message) -> SpiderResult {
-        trace!("Sending message: {:?} to relation {:?}", msg, rel);
-
-        if let Some(link_set) = self.links.get_mut(&rel) {
-            trace!("Found link set for {:?}", rel.sig());
-            if link_set.send(msg).await.is_err() {
-                self.links.remove(&rel);
-            }
-        } else {
-            trace!("creating link set for {:?}", rel.sig());
-            let mut link_set = self.create_link_set(rel.clone()).await?;
-
-            create_link_set_recv_task(rel.clone(), &mut link_set, self.sender.clone());
-
-            trace!("sending data on link set for {:?}", rel.sig());
-            link_set.send(msg).await.wrap()?;
-            trace!("saving link set for  {}", rel.sig());
-            self.links.insert(rel, link_set);
-        }
         Ok(())
-    }
-
-    async fn multicast_msg(&mut self, relations: Vec<Relation>, msg: Message) -> SpiderResult {
-        for relation in relations {
-            self.send_msg(relation, msg.clone()).await?;
-        }
-        Ok(())
-    }
-
-    async fn somecast_msg(&mut self, relations: Vec<Relation>, min: usize, msg: Message) {
-        let mut connected = Vec::new();
-        let mut disconnected = Vec::new();
-        for rel in relations {
-            if self.links.contains_key(&rel) {
-                connected.push(rel);
-            } else {
-                disconnected.push(rel)
-            }
-        }
-        let mut rng = StdRng::from_rng(rand::thread_rng()).unwrap();
-        if connected.len() >= min {
-            for receiver in connected.choose_multiple(&mut rng, min) {
-                if let Some(link) = self.links.get_mut(receiver) {
-                    link.send(msg.clone()).await;
-                }
-            }
-        } else {
-            let disconnected_count = min - connected.len();
-            for rel in connected {
-                if let Some(link) = self.links.get_mut(&rel) {
-                    link.send(msg.clone()).await;
-                }
-            }
-            for receiver in disconnected.choose_multiple(&mut rng, disconnected_count) {
-                if let Some(link) = self.links.get_mut(receiver) {
-                    link.send(msg.clone()).await;
-                }
-            }
-        }
     }
 
     /// handle request from peripheral to accept an invite (external message)
     async fn handle_invite(&mut self, invite: Invite) -> SpiderResult {
         // TODO: Invites should be signed/verified since they allow external
         // modification to the directory.
-
-        if !self.links.contains_key(invite.rel()) {
-            let mut link_set = self.create_link_set(invite.rel().clone()).await?;
-            create_link_set_recv_task(invite.rel().clone(), &mut link_set, self.sender.clone());
-
-            self.links.insert(invite.rel().clone(), link_set);
-        }
-
-        let link_set = self
-            .links
-            .get_mut(invite.rel())
-            .expect("missing link should have been created");
-
-        // add addrs from invite
-        for addr in invite.addrs() {
-            link_set.add_addr(addr.clone()).await;
-        }
 
         // update the directory
         self.directory
@@ -596,29 +671,52 @@ impl RouterProcessorState {
             })
             .await;
 
-        link_set.connect().await;
+        // prepare values to be sent
+        let name = self.pl.state().name().await.clone();
+        let addrs = get_addrs(&self.pl).await;
+
+        let link_set = self.get_or_make_link_set(invite.rel()).await?;
+
+        // If get_or_make_link_set got a link set (not made), it wont read from
+        // the directory and needs explicit addition
+        for addr in invite.addrs() {
+            link_set
+                .add_addr(addr.clone())
+                .await
+                .wrap_problem(ErrorKind::RouterError)?;
+        }
+
+        link_set
+            .connect()
+            .await
+            .wrap_problem(ErrorKind::RouterError)?;
 
         // send approval code
         let msg = RouterMessage::ApprovalCode(invite.invite_code_string());
-        link_set.send(Message::Router(msg)).await;
+        link_set
+            .send(Message::Router(msg))
+            .await
+            .wrap_problem(ErrorKind::RouterError)?;
 
         // Send name
-        let msg = Message::Router(RouterMessage::SetIdentityProperty(
-            "name".into(),
-            self.pl.state().name().await.clone(),
-        ));
-        link_set.send(msg).await;
+        let msg = Message::Router(RouterMessage::SetIdentityProperty("name".into(), name));
+        link_set
+            .send(msg)
+            .await
+            .wrap_problem(ErrorKind::RouterError)?;
 
         // Send addrs
-        let addrs = get_addrs(&self.pl).await;
         let msg = Message::Router(RouterMessage::Addrs(addrs));
-        link_set.send(msg).await;
+        link_set
+            .send(msg)
+            .await
+            .wrap_problem(ErrorKind::RouterError)?;
 
         Ok(())
     }
 
     /// handle request from peripheral to generate an invite (external message)
-    async fn handle_generate_invite(&mut self, rel: Option<Relation>) {
+    async fn handle_generate_invite(&mut self, rel: Option<Relation>) -> SpiderResult {
         info!("Generating Invite...");
 
         let self_rel = self.pl.state().self_relation().await;
@@ -626,16 +724,13 @@ impl RouterProcessorState {
         let addrs = get_addrs(&self.pl).await;
 
         let rng = thread_rng();
-        let invite_code = rng
-            .sample_iter(Standard)
-            .take(8)
-            .collect();
+        let invite_code = rng.sample_iter(Standard).take(8).collect();
         let invite = Invite::new(&self_rel, addrs, invite_code);
 
         // add code to pending
         self.pending
             .add_approval_code(invite.invite_code_string())
-            .await;
+            .await?;
 
         // add invite to ui
         let msg = UiProcessorMessage::SetSetting {
@@ -666,69 +761,29 @@ impl RouterProcessorState {
             },
             data: invite.encode(),
         };
-        self.pl.send_ui(msg).await;
+        self.pl.send_ui(msg).await?;
 
         // reply with generated invite
-        if let Some(rel) = rel {
+        if let Some(rel) = rel.as_ref() {
             let msg = Message::Router(RouterMessage::Invite(invite));
-            self.send_msg(rel, msg).await;
+            let _ = self.send_msg(rel, msg).await;
         }
+        Ok(())
     }
 
     /// handle the response from the UI button (internal message)
-    pub(crate) async fn handle_revoke_invite(&mut self, invite_code: String) {
+    pub(crate) async fn handle_revoke_invite(&mut self, invite_code: String) -> SpiderResult {
         // revoke from pending connections
-        self.pending.revoke_approval_code(invite_code.clone()).await;
+        self.pending
+            .revoke_approval_code(invite_code.clone())
+            .await?;
 
         // remove from UI
         let msg = UiProcessorMessage::RemoveSetting {
             header: "Pending Connections".into(),
             title: format!("Invite: {}", invite_code),
         };
-        self.pl.send_ui(msg).await;
-    }
-
-    async fn create_link_set(&self, rel: Relation) -> SpiderResult<LinkSet<Message>> {
-        let self_rel = self.pl.state().self_relation().await;
-        let link_set = LinkSet::new();
-        trace!("");
-
-        // add known addrs
-        if let Some(entry) = self.directory.get_entry(&rel) {
-            for addr in entry.addrs().iter() {
-                link_set.add_addr(addr.clone()).await.wrap()?;
-            }
-        }
-
-        // if let Some(addrs) = self.directory.get_system_property(&rel, "addrs") {
-        //     let addrs = serde_json::from_str(addrs).unwrap_or(Vec::new());
-        //     for addr in addrs {
-        //         link_set.add_addr(addr).await.wrap()?;
-        //     }
-        // };
-
-        // add tcp link capability
-        #[cfg(feature = "transport_tcp")]
-        link_set
-            .add_connector(spider_link::transports::tcp::TcpConnector::new(
-                self_rel.clone(),
-                rel.clone(),
-            ))
-            .await
-            .wrap()?;
-
-        #[cfg(feature = "transport_iroh")]
-        link_set
-            .add_connector(spider_link::transports::iroh::IrohConnector::new(
-                self_rel.clone(),
-                rel.clone(),
-                self.iroh_hub.endpoint().clone(),
-            ))
-            .await
-            .wrap()?;
-
-        // TODO: make the link capabilities variable
-        Ok(link_set)
+        self.pl.send_ui(msg).await
     }
 }
 
@@ -778,9 +833,17 @@ fn create_link_set_recv_task(
                         }
                     }
                 },
-                Err(_) => break,
+                Err(e) => {
+                    if let LinkSetError::SendableDeserialization(inner_e) = e {
+                        info!("Link set reader for relation {rel:?} failed to deserialize: {inner_e}");
+                        continue
+                    }else{
+                        break
+                    }
+                },
             }
         }
+        let _ = sender.send(RouterProcessorMessage::LinkReaderClosed(rel)).await;
     });
     Ok(())
 }

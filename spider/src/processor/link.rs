@@ -1,7 +1,7 @@
 use spider_link::{message::Message, Relation};
 use tokio::sync::mpsc::{error::SendError, Sender};
 
-use crate::{config::SpiderConfig, state_data::StateData};
+use crate::{config::SpiderConfig, error::{ProblemWrap, SpiderResult}, state_data::StateData};
 
 use super::{
     dataset::DatasetProcessorMessage, message::ProcessorMessage, router::RouterProcessorMessage,
@@ -39,8 +39,8 @@ impl ProcessorLink {
     pub(crate) async fn send(
         &self,
         msg: ProcessorMessage,
-    ) -> Result<(), SendError<ProcessorMessage>> {
-        self.sender.send(msg).await
+    ) -> SpiderResult {
+        self.sender.send(msg).await.wrap()
     }
 
     // send message
@@ -48,10 +48,10 @@ impl ProcessorLink {
         &self,
         rel: Relation,
         msg: Message,
-    ) -> Result<(), SendError<ProcessorMessage>> {
+    ) -> SpiderResult {
         let msg = RouterProcessorMessage::SendMessage(rel, msg);
         let msg = ProcessorMessage::RouterMessage(msg);
-        self.sender.send(msg).await
+        self.sender.send(msg).await.wrap()
     }
 
     /// Send a [Message] to each of the [Relation]s
@@ -59,10 +59,10 @@ impl ProcessorLink {
         &self,
         rels: Vec<Relation>,
         msg: Message,
-    ) -> Result<(), SendError<ProcessorMessage>> {
+    ) -> SpiderResult {
         let msg = RouterProcessorMessage::MulticastMessage(rels, msg);
         let msg = ProcessorMessage::RouterMessage(msg);
-        self.sender.send(msg).await
+        self.sender.send(msg).await.wrap()
     }
 
     // somecast message
@@ -71,27 +71,27 @@ impl ProcessorLink {
         rels: Vec<Relation>,
         limit: usize,
         msg: Message,
-    ) -> Result<(), SendError<ProcessorMessage>> {
+    ) -> SpiderResult {
         let msg = RouterProcessorMessage::SomecastMessage(rels, limit, msg);
         let msg = ProcessorMessage::RouterMessage(msg);
-        self.sender.send(msg).await
+        self.sender.send(msg).await.wrap()
     }
 
     // send ui
     pub(crate) async fn send_ui(
         &self,
         msg: UiProcessorMessage,
-    ) -> Result<(), SendError<ProcessorMessage>> {
+    ) -> SpiderResult {
         let msg = ProcessorMessage::UiMessage(msg);
-        self.sender.send(msg).await
+        self.sender.send(msg).await.wrap()
     }
 
     // send dataset
     pub(crate) async fn send_dataset(
         &self,
         msg: DatasetProcessorMessage,
-    ) -> Result<(), SendError<ProcessorMessage>> {
+    ) -> SpiderResult {
         let msg = ProcessorMessage::DatasetMessage(msg);
-        self.sender.send(msg).await
+        self.sender.send(msg).await.wrap()
     }
 }
