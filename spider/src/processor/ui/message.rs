@@ -59,7 +59,7 @@ impl std::fmt::Debug for UiProcessorMessage {
                 .field("data", data)
                 .finish(),
             Self::RemoveSetting { header, title } => f
-                .debug_struct("SetSetting")
+                .debug_struct("RemoveSetting")
                 .field("header", header)
                 .field("title", title)
                 .finish(),

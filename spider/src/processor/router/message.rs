@@ -1,5 +1,5 @@
 use spider_link::{
-    Relation, link_set::{Epoch, LinkSet}, message::{Message, RouterMessage}
+    Relation, link_set::Epoch, message::{Message, RouterMessage}
 };
 
 #[derive(Debug)]
@@ -9,7 +9,6 @@ pub enum RouterProcessorMessage {
     AddApprovalCode(String),
     ApproveConnection(Relation),
     DenyConnection(Relation),
-    ApprovedConnection(Relation, Vec<(Message, Epoch)>, LinkSet<Message>),
 
     Connected(Relation, Epoch),
     UnapprovedMessage(Relation, Message),

@@ -1,5 +1,5 @@
 use spider_link::{message::Message, Relation};
-use tokio::sync::mpsc::{error::SendError, Sender};
+use tokio::sync::mpsc::Sender;
 
 use crate::{config::SpiderConfig, error::{ProblemWrap, SpiderResult}, state_data::StateData};
 

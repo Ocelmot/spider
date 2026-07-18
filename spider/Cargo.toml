@@ -17,6 +17,7 @@ dht_chord = { git = "https://github.com/Ocelmot/chord_dht", rev = "3c3cbb88042d5
 spider_link = { path = "../spider_link", features = ["cs_0_x25519_chacha20"] }
 
 tokio = { version = "1", features = ["full"] }
+tokio-util = {version = "0.7.18", features = ["join-map"]}
 console-subscriber = "0.4.1"
 
 network-interface = "2.0.0"

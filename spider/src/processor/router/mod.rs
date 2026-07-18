@@ -8,9 +8,13 @@ use std::{
 use directory::Directory;
 use pending::PendingManager;
 use spider_link::{
-    Relation, link_set::{
-        Epoch, LinkSet, LinkSetError, LinkSetMessage, impls::authenticated::Authenticated, links::Address,
-    }, message::{Invite, Message, RouterMessage}, transports::{LinkListener, iroh::IrohHub},
+    link_set::{
+        impls::authenticated::Authenticated, links::Address, Epoch, LinkSet, LinkSetError,
+        LinkSetMessage,
+    },
+    message::{Invite, Message, RouterMessage},
+    transports::{iroh::IrohHub, LinkListener},
+    Relation,
 };
 use tokio::{
     fs::remove_file,
@@ -101,7 +105,7 @@ impl RouterProcessorState {
         receiver: Receiver<RouterProcessorMessage>,
     ) -> SpiderResult<Self> {
         let directory = Directory::load_directory(pl.clone()).await;
-        let pending = PendingManager::new(pl.clone(), sender.clone());
+        let pending = PendingManager::new();
 
         let permit_file_path = PathBuf::from("./permit_ui");
         let permit_file = permit_file_path.exists();
@@ -185,7 +189,14 @@ impl RouterProcessorState {
                             directory::LinkApproval::Unknown => {
                                 // add link to pending
                                 trace!("Link Unknown");
-                                self.pending.add_link(link).await
+                                let res = self.pending.add_link(link).await;
+                                match res {
+                                    Ok(pending::AddLinkResult::New(rel)) => {
+                                        add_pending_ui_setting(&self.pl, &rel).await
+                                    },
+                                    Ok(pending::AddLinkResult::Existing) => Ok(()),
+                                    Err(e) => Err(e),
+                                }
                             },
                             directory::LinkApproval::Allowed => {
                                 // insert into existing link set, or create new
@@ -194,6 +205,9 @@ impl RouterProcessorState {
                                 self.insert_link(link).await
                             },
                         }
+                    }
+                    (rel, link_info) = self.pending.poll() => {
+                        self.handle_poll(rel, link_info).await
                     }
                     msg = self.receiver.recv() => {
                         let Some(msg) = msg else {
@@ -395,11 +409,7 @@ impl RouterProcessorState {
                 self.pending.deny_connection(&relation).await?;
             }
             RouterProcessorMessage::AddApprovalCode(code) => {
-                self.pending.add_approval_code(code).await?;
-            }
-            RouterProcessorMessage::ApprovedConnection(rel, backlog, link_set) => {
-                self.handle_approved_connection(rel, backlog, link_set)
-                    .await?;
+                self.pending.add_approval_code(code);
             }
 
             RouterProcessorMessage::Connected(rel, epoch) => {
@@ -428,7 +438,7 @@ impl RouterProcessorState {
             }
             RouterProcessorMessage::Disconnected(_rel) => {}
             RouterProcessorMessage::LinkReaderClosed(rel) => {
-                if self.links.get(&rel).is_some_and(|ls|ls.is_terminated()) {
+                if self.links.get(&rel).is_some_and(|ls| ls.is_terminated()) {
                     self.links.remove(&rel);
                 }
             }
@@ -508,7 +518,14 @@ impl RouterProcessorState {
                 // should check for disconnected peers, and clean them up
 
                 self.directory.upkeep().await;
-                self.pending.upkeep();
+                let expired = self.pending.upkeep();
+                for expired in expired {
+                    let msg = UiProcessorMessage::RemoveSetting {
+                        header: "Pending Connections".into(),
+                        title: format!("Invite: {}", expired),
+                    };
+                    self.pl.send_ui(msg).await?;
+                }
             }
         }
 
@@ -605,22 +622,17 @@ impl RouterProcessorState {
     async fn handle_approved_connection(
         &mut self,
         relation: Relation,
-        backlog: Vec<(Message, Epoch)>,
         mut link_set: LinkSet<Message>,
+        backlog: Vec<(Message, Epoch)>,
     ) -> SpiderResult {
         info!("Connection Approved");
-        // remove the pending connection, and update the ui
-        self.pending.remove_connection(&relation).await?;
-
-        // Inform other side that the connection is approved.
-        let msg = Message::Router(RouterMessage::Approved);
-        link_set
-            .send(msg)
-            .await
-            .wrap_problem_msg(ErrorKind::RouterError, "Link disconnected during approval")?;
 
         // add link relation to directory
         self.directory.add_identity(&relation).await?;
+
+        // Initialize the link itself (connectors, etc)
+        self.initialize_link_set(&mut link_set, &relation).await?;
+        create_link_set_recv_task(relation.clone(), &mut link_set, self.sender.clone())?;
 
         // send backlogged messages
         for (msg, _epoch) in backlog {
@@ -630,27 +642,22 @@ impl RouterProcessorState {
                     msg,
                 ))
                 .await
-                .wrap_problem_msg(ErrorKind::RouterError, "Link disconnected during approval")?;
+                .wrap_problem(ErrorKind::Stopped)?;
         }
 
-        self.initialize_link_set(&mut link_set, &relation).await?;
-        create_link_set_recv_task(relation.clone(), &mut link_set, self.sender.clone())?;
+        // Inform other side that the connection is approved.
+        let msg = Message::Router(RouterMessage::Approved);
+        let _ = link_set.send(msg).await;
 
         // Send Name
         let msg =
             RouterMessage::SetIdentityProperty("name".into(), self.pl.state().name().await.clone());
-        link_set
-            .send(Message::Router(msg))
-            .await
-            .wrap_problem_msg(ErrorKind::RouterError, "Link disconnected during approval")?;
+        let _ = link_set.send(Message::Router(msg)).await;
 
         // Send Addrs
         let addrs = get_addrs(&self.pl).await;
         let msg = RouterMessage::Addrs(addrs);
-        link_set
-            .send(Message::Router(msg))
-            .await
-            .wrap_problem_msg(ErrorKind::RouterError, "Link disconnected during approval")?;
+        let _ = link_set.send(Message::Router(msg)).await;
 
         // add link to structures
         self.links.insert(relation, link_set);
@@ -728,9 +735,7 @@ impl RouterProcessorState {
         let invite = Invite::new(&self_rel, addrs, invite_code);
 
         // add code to pending
-        self.pending
-            .add_approval_code(invite.invite_code_string())
-            .await?;
+        self.pending.add_approval_code(invite.invite_code_string());
 
         // add invite to ui
         let msg = UiProcessorMessage::SetSetting {
@@ -774,9 +779,7 @@ impl RouterProcessorState {
     /// handle the response from the UI button (internal message)
     pub(crate) async fn handle_revoke_invite(&mut self, invite_code: String) -> SpiderResult {
         // revoke from pending connections
-        self.pending
-            .revoke_approval_code(invite_code.clone())
-            .await?;
+        self.pending.revoke_approval_code(&invite_code);
 
         // remove from UI
         let msg = UiProcessorMessage::RemoveSetting {
@@ -785,6 +788,73 @@ impl RouterProcessorState {
         };
         self.pl.send_ui(msg).await
     }
+
+    pub(crate) async fn handle_poll(
+        &mut self,
+        rel: Relation,
+        link: Option<(LinkSet<Message>, Vec<(Message, Epoch)>, Option<String>)>,
+    ) -> SpiderResult {
+        remove_pending_ui_setting(&self.pl, &rel).await?;
+        match link {
+            Some((link_set, backlog, used_code)) => {
+                if let Some(used_code) = used_code {
+                    // remove from UI
+                    let msg = UiProcessorMessage::RemoveSetting {
+                        header: "Pending Connections".into(),
+                        title: format!("Invite: {}", used_code),
+                    };
+                    self.pl.send_ui(msg).await?;
+                }
+                self.handle_approved_connection(rel, link_set, backlog)
+                    .await
+            }
+            None => Ok(()),
+        }
+    }
+}
+
+// Ui Helper functions
+
+async fn add_pending_ui_setting(pl: &ProcessorLink, rel: &Relation) -> SpiderResult {
+    let sig = rel.sig();
+    let title = format!("{:?}: {}", rel.role, sig);
+    let msg = UiProcessorMessage::SetSetting {
+        header: String::from("Pending Connections"),
+        title,
+        inputs: vec![
+            ("button".to_string(), "Approve".to_string()),
+            ("button".to_string(), "Deny".to_string()),
+        ],
+        cb: |e| {
+            if e.index() == 0 {
+                // Approve
+                if let Some(rel) = Relation::from_base64(e.data()) {
+                    let msg = RouterProcessorMessage::ApproveConnection(rel);
+                    return Some(ProcessorMessage::RouterMessage(msg));
+                }
+            }
+            if e.index() == 1 {
+                // Deny
+                if let Some(rel) = Relation::from_base64(e.data()) {
+                    let msg = RouterProcessorMessage::DenyConnection(rel);
+                    return Some(ProcessorMessage::RouterMessage(msg));
+                }
+            }
+            None
+        },
+        data: rel.to_base64(),
+    };
+    pl.send_ui(msg).await
+}
+
+pub async fn remove_pending_ui_setting(pl: &ProcessorLink, rel: &Relation) -> SpiderResult {
+    let sig = rel.sig();
+    let title = format!("{:?}: {}", rel.role, sig);
+    let msg = UiProcessorMessage::RemoveSetting {
+        header: String::from("Pending Connections"),
+        title,
+    };
+    pl.send_ui(msg).await
 }
 
 fn create_link_set_recv_task(
@@ -835,15 +905,19 @@ fn create_link_set_recv_task(
                 },
                 Err(e) => {
                     if let LinkSetError::SendableDeserialization(inner_e) = e {
-                        info!("Link set reader for relation {rel:?} failed to deserialize: {inner_e}");
-                        continue
-                    }else{
-                        break
+                        info!(
+                            "Link set reader for relation {rel:?} failed to deserialize: {inner_e}"
+                        );
+                        continue;
+                    } else {
+                        break;
                     }
-                },
+                }
             }
         }
-        let _ = sender.send(RouterProcessorMessage::LinkReaderClosed(rel)).await;
+        let _ = sender
+            .send(RouterProcessorMessage::LinkReaderClosed(rel))
+            .await;
     });
     Ok(())
 }
