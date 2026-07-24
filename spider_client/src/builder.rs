@@ -189,17 +189,22 @@ impl SpiderClientBuilder {
         self.state.base_addrs.clear();
     }
 
-    // Beacon
-    /// Enable or disable the use of the beacon connection strategy.
+    // Discovery
+    /// Enable or disable the use of whichever discovery strategy is available
+    /// on the platform.
+    /// 
     /// Enabled by default
-    /// The beacon connection strategy will broadcast a probe that
-    /// bases on the same network should respond to. Can be used to find
-    /// bases that are not yet paired.
-    pub fn enable_beacon(&mut self, set: bool) {
-        self.state.beacon_enable = set;
+    /// 
+    /// The beacon connection strategy will broadcast a probe that bases on the
+    /// same network should respond to. Can be used to find bases that are not
+    /// yet paired. On platforms that disallow UDP, the mdns strategy will be
+    /// used instead.
+    pub fn enable_discovery(&mut self, set: bool) {
+        self.state.discovery_enable = set;
     }
 
-    /// Returns the port the beacon will use when it tries to find the base
+    /// Returns the port the beacon will use when it tries to find the base. Not
+    /// applicable to mdns.
     pub fn beacon_port(&self) -> u16 {
         self.state.beacon_port
     }

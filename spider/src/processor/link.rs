@@ -1,7 +1,11 @@
 use spider_link::{message::Message, Relation};
 use tokio::sync::mpsc::Sender;
 
-use crate::{config::SpiderConfig, error::{ProblemWrap, SpiderResult}, state_data::StateData};
+use crate::{
+    config::SpiderConfig,
+    error::{ProblemWrap, SpiderResult},
+    state_data::StateData,
+};
 
 use super::{
     dataset::DatasetProcessorMessage, message::ProcessorMessage, router::RouterProcessorMessage,
@@ -36,19 +40,12 @@ impl ProcessorLink {
         &self.state
     }
 
-    pub(crate) async fn send(
-        &self,
-        msg: ProcessorMessage,
-    ) -> SpiderResult {
+    pub(crate) async fn send(&self, msg: ProcessorMessage) -> SpiderResult {
         self.sender.send(msg).await.wrap()
     }
 
     // send message
-    pub(crate) async fn send_message(
-        &self,
-        rel: Relation,
-        msg: Message,
-    ) -> SpiderResult {
+    pub(crate) async fn send_message(&self, rel: Relation, msg: Message) -> SpiderResult {
         let msg = RouterProcessorMessage::SendMessage(rel, msg);
         let msg = ProcessorMessage::RouterMessage(msg);
         self.sender.send(msg).await.wrap()
@@ -78,19 +75,13 @@ impl ProcessorLink {
     }
 
     // send ui
-    pub(crate) async fn send_ui(
-        &self,
-        msg: UiProcessorMessage,
-    ) -> SpiderResult {
+    pub(crate) async fn send_ui(&self, msg: UiProcessorMessage) -> SpiderResult {
         let msg = ProcessorMessage::UiMessage(msg);
         self.sender.send(msg).await.wrap()
     }
 
     // send dataset
-    pub(crate) async fn send_dataset(
-        &self,
-        msg: DatasetProcessorMessage,
-    ) -> SpiderResult {
+    pub(crate) async fn send_dataset(&self, msg: DatasetProcessorMessage) -> SpiderResult {
         let msg = ProcessorMessage::DatasetMessage(msg);
         self.sender.send(msg).await.wrap()
     }

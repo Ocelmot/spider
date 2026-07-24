@@ -2,7 +2,8 @@ use std::io::Error;
 use std::net::SocketAddrV4;
 use std::{path::Path, time::Duration};
 
-use spider_link::beacon:: start_beacon_listen_handler_on;
+use spider_link::discovery::beacon::start_beacon_listen_handler_on;
+use spider_link::link_set::links::Address;
 use tracing::info;
 use spider_link::message::Message;
 use spider_link::Keyfile;
@@ -68,8 +69,8 @@ impl ProcessorBuilder {
         self.state = Some(state);
     }
 
-    pub fn state_file(&mut self, state_path: &Path) -> Result<(), Error> {
-        let state = StateData::load_file(state_path);
+    pub fn state_file(&mut self, state_path: &Path, static_addrs: Vec<Address>) -> Result<(), Error> {
+        let state = StateData::load_file(state_path, static_addrs);
         match state {
             Ok(state) => {
                 self.state = Some(state);
@@ -91,11 +92,13 @@ impl ProcessorBuilder {
             Some(config) => config,
             None => return Err(SpiderError::new().msg("Failed to read config")),
         };
-        let state = match self.state {
+        let mut state = match self.state {
             Some(state) => state,
             None => return Err(SpiderError::new().msg("Failed to read state")),
         };
         state.save_file().await; // normalizes the state file
+        state.set_beacon_emit_name(true).await;
+        state.set_beacon_emit_id(true).await;
         let processor = Processor::new(config, state).await?;
         Ok(processor.start())
     }
@@ -130,9 +133,10 @@ impl Processor {
         // start beacon
         if config.beacon_enabled() {
             info!("Starting beacon listener.");
+            let template = state.advert_template_subscribe();
             let listen_addr: SocketAddrV4 = config.listen_addr.parse().expect("invalid beacon address");
             let beacon_port = config.beacon_port();
-            start_beacon_listen_handler_on(listen_addr.port(), beacon_port);
+            start_beacon_listen_handler_on(template, listen_addr.port(), beacon_port);
         }else{
             info!("Beacon listener disabled.");
         }

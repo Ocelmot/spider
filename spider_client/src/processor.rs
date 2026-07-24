@@ -1,19 +1,13 @@
 use core::panic;
-use std::{path::PathBuf, time::Duration};
+use std::{collections::HashSet, path::PathBuf, time::Duration};
 
 #[cfg(feature = "transport_iroh")]
 use spider_link::transports::iroh::{IrohHub, SecretKey};
 use spider_link::{
-    beacon::Beacon,
-    link_set::links::Address,
-    link_set::{Epoch, LinkSet, LinkSetMessage},
-    message::{Message, RouterMessage},
-    Relation,
+    Relation, discovery::{AdvertEvent, Discoverer, get_discovery}, link_set::{Epoch, LinkSet, LinkSetMessage, links::Address}, message::{Message, RouterMessage},
 };
 use tokio::{
-    select, spawn,
-    sync::mpsc::{channel, unbounded_channel, Receiver, UnboundedSender},
-    task::JoinHandle,
+    select, spawn, sync::mpsc::{Receiver, UnboundedSender, channel, unbounded_channel}, task::JoinHandle, time::interval,
 };
 use tracing::{error, info, trace};
 
@@ -28,7 +22,7 @@ pub(crate) struct SpiderClientProcessor {
     state_path: Option<PathBuf>,
     state: SpiderClientState,
     link_set: Option<LinkSet<Message>>,
-    beacon: Beacon,
+    discoverer: Option<Box<dyn Discoverer>>,
     #[cfg(feature = "transport_iroh")]
     iroh_hub: Option<IrohHub>,
     client_channel: ClientChannel,
@@ -60,9 +54,6 @@ impl SpiderClientProcessor {
             (client_channel, Vec::new())
         };
 
-        let mut beacon = Beacon::new(Duration::from_secs(10));
-        beacon.set_port(state.beacon_port);
-
         #[cfg(feature = "transport_iroh")]
         let iroh_hub ={
             use spider_link::transports::iroh::IROH_SCHEME;
@@ -82,7 +73,7 @@ impl SpiderClientProcessor {
             state_path,
             state,
             link_set: None,
-            beacon,
+            discoverer: None,
             #[cfg(feature = "transport_iroh")]
             iroh_hub,
             client_channel: client_channel.clone(),
@@ -108,6 +99,10 @@ impl SpiderClientProcessor {
         let Some(host_relation) = &self.state.host_relation else {
             return Ok(());
         };
+
+        if self.state.discovery_enable{
+            self.discoverer = Some(get_discovery(self.state.beacon_port));
+        }
 
         let link_set = LinkSet::new();
 
@@ -197,11 +192,13 @@ impl SpiderClientProcessor {
         let mut connected = false;
         let mut reconnecting = false;
 
+        let mut discovered_addrs = HashSet::new();
+        let mut addr_retry_interval = interval(Duration::from_secs(15));
         loop {
             trace!(
-                "connected: {connected}, link_set.is_some() {}, beacon_enable: {}",
+                "connected: {connected}, link_set.is_some() {}, discovery_enable: {}",
                 self.link_set.is_some(),
-                self.state.beacon_enable
+                self.state.discovery_enable
             );
             select! {
                 res = opt_link_set_recv(self.link_set.as_mut()) => {
@@ -222,6 +219,9 @@ impl SpiderClientProcessor {
                             self.process_client_response(ClientResponse::Connected(epoch)).await;
                         },
                         LinkSetMessage::AttemptingConnection(re_con) => {
+                            if re_con{
+                                addr_retry_interval.reset_immediately();
+                            }
                             reconnecting = re_con;
                         }
                         LinkSetMessage::Message(message, epoch) => {
@@ -252,7 +252,8 @@ impl SpiderClientProcessor {
                                 if let Some(link_set) = self.link_set.take() {
                                     self.dispose_link_set(link_set).await?;
                                 }
-                                self.beacon.clear_sockets();
+                                self.discoverer = None;
+                                discovered_addrs.clear();
                                 self.process_client_response(ClientResponse::Disconnected).await;
                                 self.process_client_response(ClientResponse::Unpaired(old_relation)).await;
                                 continue;
@@ -330,11 +331,12 @@ impl SpiderClientProcessor {
                                             self.process_client_response(ClientResponse::Disconnected).await;
                                             self.dispose_link_set(link_set).await?;
                                             connected = false;
-                                            self.beacon.clear_sockets();
                                         }
+                                        self.discoverer = None;
                                         // Clear cached base addresses to prevent stale addresses
                                         // from being used when re-pairing
                                         self.state.base_addrs.clear();
+                                        discovered_addrs.clear();
                                         let _ = self.save_state().await;
                                         self.process_client_response(ClientResponse::Unpaired(old_relation)).await;
                                     }
@@ -366,11 +368,37 @@ impl SpiderClientProcessor {
                         },
                     }
                 },
-                addr = self.beacon.next_addr(), if reconnecting && self.link_set.is_some() && self.state.beacon_enable => {
+                addr = opt_next_addr(self.discoverer.as_mut()), if reconnecting && self.link_set.is_some() && self.state.discovery_enable => {
                     info!("Client received addr: {:?}", addr);
+                    match addr {
+                        AdvertEvent::Found(base_advert) => {
+                            if base_advert.id.is_none_or(|id| id == self.state.host_relation.as_ref().unwrap().id) {
+                                let addrs = base_advert.addrs;
+                                discovered_addrs.extend(addrs.clone());
+                                // can only add addrs when the link is paired
+                                if let Some(link_set) = &self.link_set{
+                                    for addr in addrs{
+                                        let _ = link_set.try_addr(addr).await;
+                                    }
+                                }
+                            }
+                        },
+                        AdvertEvent::Lost(base_advert) => {
+                            if base_advert.id.is_none_or(|id| id == self.state.host_relation.as_ref().unwrap().id) {
+                                let addrs = base_advert.addrs;
+                                for addr in addrs{
+                                    discovered_addrs.remove(&addr);
+                                }
+                            }
+                        },
+                    }
+                }
+                _ = addr_retry_interval.tick(), if reconnecting && self.link_set.is_some() && self.state.discovery_enable => {
                     // can only add addrs when the link is paired
                     if let Some(link_set) = &self.link_set{
-                        let _ = link_set.try_addr(Address::new("auth_tcp",addr.to_string()) ).await;
+                        for addr in &discovered_addrs{
+                            let _ = link_set.try_addr(addr.clone()).await;
+                        }
                     }
                 }
             }
@@ -432,6 +460,13 @@ async fn opt_link_set_recv(
             let msg = ls.recv().await?;
             Ok((ls, msg))
         }
+        None => std::future::pending().await,
+    }
+}
+
+async fn opt_next_addr(d: Option<&mut Box<dyn Discoverer>>) -> AdvertEvent {
+    match d {
+        Some(d) => d.next_addr().await,
         None => std::future::pending().await,
     }
 }

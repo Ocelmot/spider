@@ -184,9 +184,9 @@ impl PeripheralProcessorState{
         self.write_keyfile(path.clone()).await;
 
         // list process in state file
-        let mut ps = self.state.peripheral_services().await;
-        ps.insert(name.clone(), true);
-        drop(ps);
+        self.state.modify_peripheral_services(|mut services|{
+            services.insert(name.clone(), true);
+        }).await;
 
         // launch peripheral as sub-process
         info!("launching subprocess...");
@@ -202,15 +202,11 @@ impl PeripheralProcessorState{
     
 
     async fn start_service(&mut self, name: String){
-        match self.state.peripheral_services().await.get_mut(&name){
-            Some(running) if *running == false => {
-                // set to running
-                *running = true;
-            },
-            _ => {
-                return; // not installed, or already running
-            }, 
-        }
+        self.state.modify_peripheral_services(|mut services|{
+            if let Some(running) = services.get_mut(&name) {
+                *running = true
+            }
+        }).await;
 
         // start child
         let child = self.launch_peripheral_service(name.clone()).await;
@@ -222,15 +218,12 @@ impl PeripheralProcessorState{
     }
 
     async fn stop_service(&mut self, name: String){
-        match self.state.peripheral_services().await.get_mut(&name){
-            Some(running) if *running == true => {
-                // set to stopped
-                *running = false;
-            },
-            _ => {
-                return; // not installed, or already stopped
-            }, 
-        }
+        self.state.modify_peripheral_services(|mut services|{
+            if let Some(running) = services.get_mut(&name) {
+                *running = false
+            }
+        }).await;
+
 
         if let Some(mut child) = self.children.remove(&name){
             child.kill().await;
@@ -247,9 +240,11 @@ impl PeripheralProcessorState{
         info!("Produced path: {}", path.display());
 
         // remove from state
-        let mut ps = self.state.peripheral_services().await;
-        ps.remove(&name);
-        drop(ps);
+        self.state.modify_peripheral_services(|mut services|{
+            services.remove(&name);
+        }).await;
+
+
         self.state.save_file().await;
 
         // stop child if started

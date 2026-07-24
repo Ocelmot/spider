@@ -1,61 +1,88 @@
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, base64::Base64};
-use spider_link::{message::DirectoryEntry, Relation, Role, SelfRelation, SpiderId2048};
-use tracing::warn;
+use serde_with::{base64::Base64, serde_as};
+use spider_link::{
+    discovery::BaseAdvert, link_set::links::Address, message::DirectoryEntry, Relation, Role,
+    SelfRelation, SpiderId2048,
+};
 use std::{
     collections::HashMap,
     fs, io,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
-// use veilid_core::DHTRecordDescriptor;
+use tracing::warn;
 
 use rsa::{
     pkcs8::{DecodePrivateKey, EncodePrivateKey},
     RsaPrivateKey,
 };
 
-use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
+use tokio::sync::{
+    watch::{self, Receiver},
+    Mutex, RwLock, RwLockMappedWriteGuard, RwLockReadGuard, RwLockWriteGuard,
+};
 
 #[derive(Debug, Clone)]
 pub struct StateData {
     // Acquire locks in struct order.
+    dirty: Arc<AtomicBool>,
     filename: Arc<Mutex<PathBuf>>,
-    inner: Arc<Mutex<StateDataInner>>,
+    inner: Arc<RwLock<StateDataInner>>,
+    advert_template: watch::Sender<BaseAdvert>,
+    static_addrs: Vec<Address>,
 }
 
 impl StateData {
-    pub fn load_file(path: &Path) -> io::Result<Self> {
+    pub fn load_file(path: &Path, static_addrs: Vec<Address>) -> io::Result<Self> {
         let data = fs::read_to_string(&path)?;
         let inner = serde_json::from_str(&data).expect("Failed to deserialize config");
+        let template = generate_template(&inner, &static_addrs);
         Ok(Self {
+            dirty: Arc::new(AtomicBool::new(false)),
             filename: Arc::new(Mutex::new(path.to_path_buf())),
-            inner: Arc::new(Mutex::new(inner)),
+            inner: Arc::new(RwLock::new(inner)),
+            advert_template: watch::Sender::new(template),
+            static_addrs,
         })
     }
 
-    pub fn with_generated_key(path: &Path) -> Self {
+    pub fn with_generated_key(path: &Path, static_addrs: Vec<Address>) -> Self {
         let path = path.to_path_buf();
         let mut rng = rand::thread_rng();
         let priv_key = RsaPrivateKey::new(&mut rng, 2048).expect("failed to generate key");
         let bytes = priv_key.to_pkcs8_der().unwrap().as_bytes().to_vec();
+        let inner = StateDataInner::new(bytes);
+        let template = generate_template(&inner, &static_addrs);
         Self {
+            dirty: Arc::new(AtomicBool::new(true)),
             filename: Arc::new(Mutex::new(path)),
-            inner: Arc::new(Mutex::new(StateDataInner::new(bytes))),
+            inner: Arc::new(RwLock::new(inner)),
+            advert_template: watch::Sender::new(template),
+            static_addrs,
         }
     }
 
     pub async fn save_file(&self) {
-        let filename = self.filename.lock().await;
-        let inner = self.inner.lock().await;
-        let contents = serde_json::to_string(&*inner).unwrap();
-        if let Err(e) = tokio::fs::write(&*filename, contents).await {
-            warn!("Failed to save state file: {e}");
+        let was_dirty = self.dirty.swap(false, Ordering::SeqCst);
+        if was_dirty {
+            let filename = self.filename.lock().await;
+            let inner = self.inner.read().await;
+            let contents = serde_json::to_string(&*inner).unwrap();
+            if let Err(e) = tokio::fs::write(&*filename, contents).await {
+                warn!("Failed to save state file: {e}");
+            }
         }
     }
 
+    pub fn advert_template_subscribe(&self) -> Receiver<BaseAdvert> {
+        self.advert_template.subscribe()
+    }
+
     pub async fn priv_key(&self) -> RsaPrivateKey {
-        let inner = self.inner.lock().await;
+        let inner = self.inner.read().await;
         let priv_key = RsaPrivateKey::from_pkcs8_der(&inner.key_der).unwrap();
         priv_key
     }
@@ -71,21 +98,57 @@ impl StateData {
         SelfRelation::from_key(key, Role::Peer)
     }
 
+    pub async fn set_beacon_emit_name(&self, emit: bool) {
+        {
+            let mut inner = self.inner.write().await;
+            inner.beacon_emit_name = emit;
+        }
+        self.dirty.store(true, Ordering::SeqCst);
+        self.generate_template().await;
+    }
+
+    pub async fn set_beacon_emit_id(&self, emit: bool) {
+        {
+            let mut inner = self.inner.write().await;
+            inner.beacon_emit_id = emit;
+        }
+        self.dirty.store(true, Ordering::SeqCst);
+        self.generate_template().await;
+    }
+
     // Peripheral Items
-    pub async fn peripheral_services(&self) -> MappedMutexGuard<'_, HashMap<String, bool>> {
-        let inner = self.inner.lock().await;
-        MutexGuard::map(inner, |f| &mut f.peripheral_services)
+    pub async fn peripheral_services(&self) -> RwLockReadGuard<'_, HashMap<String, bool>> {
+        let inner = self.inner.read().await;
+        RwLockReadGuard::map(inner, |f| &f.peripheral_services)
+    }
+
+    pub async fn modify_peripheral_services<F>(&self, mut func: F)
+    where
+        F: FnMut(RwLockMappedWriteGuard<'_, HashMap<String, bool>>),
+    {
+        let inner = self.inner.write().await;
+        let guard = RwLockWriteGuard::map(inner, |f| &mut f.peripheral_services);
+        func(guard);
+        self.dirty.store(true, Ordering::SeqCst);
     }
 
     // Router Items
-    pub async fn name(&self) -> MappedMutexGuard<'_, String> {
-        let inner = self.inner.lock().await;
-        // inner.name.as_ref().unwrap_or(&String::from("No Name"))
-        MutexGuard::map(inner, |i| i.name.get_or_insert(String::from("NoName")))
+    pub async fn name(&self) -> RwLockReadGuard<'_, str> {
+        let inner = self.inner.read().await;
+        RwLockReadGuard::map(inner, |i| i.name.as_deref().unwrap_or("NoName"))
+    }
+
+    pub async fn set_name(&self, name: String) {
+        {
+            let mut inner = self.inner.write().await;
+            inner.name = Some(name);
+        }
+        self.generate_template().await;
+        self.dirty.store(true, Ordering::SeqCst);
     }
 
     pub async fn load_directory(&self) -> HashMap<Relation, DirectoryEntry> {
-        let inner = self.inner.lock().await;
+        let inner = self.inner.read().await;
         let mut ret = HashMap::new();
         for entry in &inner.directory {
             let rel = entry.relation().clone();
@@ -98,33 +161,56 @@ impl StateData {
         for (_, entry) in directory {
             v.push(entry.clone());
         }
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.inner.write().await;
         inner.directory = v;
     }
 
     // Transport related data
 
-    pub async fn iroh_secret(&self) -> MappedMutexGuard<'_, [u8; 32]> {
-        let inner = self.inner.lock().await;
-        MutexGuard::map(inner, |f| &mut f.iroh_secret)
+    pub async fn iroh_secret(&self) -> RwLockReadGuard<'_, [u8; 32]> {
+        let inner = self.inner.read().await;
+        RwLockReadGuard::map(inner, |f| &f.iroh_secret)
     }
 
-    // pub async fn veilid_own_dht(&self) -> MappedMutexGuard<'_, Option<()>> {
-    //     let inner = self.inner.lock().await;
-    //     // MutexGuard::map(inner, |i| &mut i.veilid_own_dht)
-    //     MutexGuard::map(inner, |i| None)
-    // }
+    /// Regenerates the template used by the discovery services
+    async fn generate_template(&self) {
+        let template = generate_template(&*self.inner.read().await, &self.static_addrs);
+        self.advert_template.send_replace(template);
+    }
+}
 
+/// Generate the template from the inner and the static addrs. Does not hold locks or is async
+fn generate_template(inner: &StateDataInner, static_addrs: &[Address]) -> BaseAdvert {
+    let addrs = static_addrs.to_vec();
+
+    let (name, key_der) = {
+        (
+            inner.beacon_emit_name.then(|| inner.name.clone()).flatten(),
+            inner.beacon_emit_id.then(|| inner.key_der.clone()),
+        )
+    };
+
+    let id = key_der.map(|der| {
+        let priv_key = RsaPrivateKey::from_pkcs8_der(&der).unwrap();
+        SpiderId2048::from_key(priv_key.to_public_key())
+    });
+
+    BaseAdvert { addrs, name, id }
 }
 
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize)]
 struct StateDataInner {
-    pub key_der: Vec<u8>,
+    key_der: Vec<u8>,
+
+    #[serde(default = "default_true")]
+    beacon_emit_name: bool,
+    #[serde(default = "default_true")]
+    beacon_emit_id: bool,
 
     // Peripheral Items
     #[serde(default)]
-    pub peripheral_services: HashMap<String, bool>,
+    peripheral_services: HashMap<String, bool>,
 
     // Router Items
     #[serde(default)]
@@ -137,33 +223,34 @@ struct StateDataInner {
     #[serde_as(as = "Base64")]
     #[serde(default = "iroh_default")]
     iroh_secret: [u8; 32],
-
-    // #[serde(default)]
-    // veilid_own_dht: Option<DHTRecordDescriptor>,
 }
 
 impl StateDataInner {
     fn new(key_der: Vec<u8>) -> Self {
         Self {
             key_der,
+            beacon_emit_name: true,
+            beacon_emit_id: true,
 
             // Peripheral Items
             peripheral_services: HashMap::new(),
 
             // Router Items
             name: None,
-            
+
             directory: Vec::new(),
 
             // Transport items
             iroh_secret: iroh_default(),
-
-            // veilid_own_dht: None,
         }
     }
 }
 
-fn iroh_default() -> [u8; 32]{
+fn default_true() -> bool {
+    true
+}
+
+fn iroh_default() -> [u8; 32] {
     use rand::RngCore;
 
     let mut new_secret = [0u8; 32];

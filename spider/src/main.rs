@@ -110,13 +110,13 @@ async fn main() -> Result<(), io::Error> {
 
     let mut pb = ProcessorBuilder::new();
     pb.config(config.clone());
-    pb.state_file(Path::new(&config.state_data_path));
+    pb.state_file(Path::new(&config.state_data_path), config.static_addrs.clone());
 
     // if state is empty, enter new mode to create an id and establish first UI connection/owner
     // (could also migrate id from other spider)
     // else, use loaded state with known id
     if pb.is_new() {
-        let state = StateData::with_generated_key(Path::new(&config.state_data_path));
+        let state = StateData::with_generated_key(Path::new(&config.state_data_path), config.static_addrs.clone());
         pb.state(state);
     }
 

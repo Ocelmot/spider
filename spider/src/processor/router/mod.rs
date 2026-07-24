@@ -122,7 +122,7 @@ impl RouterProcessorState {
         let (listen_tx, listen_rx) = channel::<Authenticated>(10);
 
         // set up tcp listener
-        let name = pl.state().name().await.clone();
+        let name = pl.state().name().await.to_string();
         let key_req = if pl.config().key_req_enabled() {
             info!("Key requests enabled, current name = {name}");
             Arc::new(Mutex::new(Some(name)))
@@ -229,7 +229,7 @@ impl RouterProcessorState {
     async fn init_ui(&mut self) {
         // ===== Setup menu items =====
         // Change/Set name
-        let name = self.pl.state().name().await.clone();
+        let name = self.pl.state().name().await.to_string();
         let msg = UiProcessorMessage::SetSetting {
             header: String::from("System"),
             title: "Name:".into(),
@@ -415,7 +415,7 @@ impl RouterProcessorState {
             RouterProcessorMessage::Connected(rel, epoch) => {
                 if let Some(link) = self.links.get(&rel) {
                     // Send our name to them
-                    let name = self.pl.state().name().await.clone();
+                    let name = self.pl.state().name().await.to_string();
                     let msg = RouterMessage::SetIdentityProperty("name".into(), name);
                     let msg = Message::Router(msg);
                     let _ = link.send_with_epoch(msg, epoch).await;
@@ -456,9 +456,7 @@ impl RouterProcessorState {
 
             RouterProcessorMessage::SetName(name) => {
                 // save new name
-                let mut state_name = self.pl.state().name().await;
-                *state_name = name.clone();
-                drop(state_name);
+                self.pl.state().set_name(name.clone()).await;
 
                 // inform listener
                 let mut key_req = self.key_req.lock().await;
@@ -651,7 +649,7 @@ impl RouterProcessorState {
 
         // Send Name
         let msg =
-            RouterMessage::SetIdentityProperty("name".into(), self.pl.state().name().await.clone());
+            RouterMessage::SetIdentityProperty("name".into(), self.pl.state().name().await.to_string());
         let _ = link_set.send(Message::Router(msg)).await;
 
         // Send Addrs
@@ -679,7 +677,7 @@ impl RouterProcessorState {
             .await;
 
         // prepare values to be sent
-        let name = self.pl.state().name().await.clone();
+        let name = self.pl.state().name().await.to_string();
         let addrs = get_addrs(&self.pl).await;
 
         let link_set = self.get_or_make_link_set(invite.rel()).await?;

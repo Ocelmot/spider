@@ -11,8 +11,6 @@ pub struct SpiderConfig {
     #[serde(default = "default_listen_addr")]
     pub listen_addr: String,
 
-
-
     #[serde(default = "default_pub_addr")]
     pub pub_addr: String,
 
@@ -21,7 +19,7 @@ pub struct SpiderConfig {
     #[serde(default)]
     pub static_addrs: Vec<Address>,
 
-    #[serde(default="default_false")]
+    #[serde(default = "default_false")]
     pub use_nic_addrs: bool,
 
     #[serde(default = "default_log_path")]
@@ -63,7 +61,7 @@ impl SpiderConfig {
             Err(e) => {
                 eprintln!("Error loading config, using defaults. Error: {e}");
                 String::from("{}")
-            },
+            }
         };
         // println!("Loaded config data: {}", data);
         // let data = fs::read_to_string(&path).expect(&format!("Failed to read config file: {:?}", path));
@@ -106,11 +104,11 @@ impl SpiderConfig {
 }
 
 // Defaults
-fn default_true() -> bool{
+fn default_true() -> bool {
     true
 }
 
-fn default_false() -> bool{
+fn default_false() -> bool {
     false
 }
 
@@ -132,8 +130,4 @@ fn default_state_data_path() -> String {
 
 fn default_beacon_port() -> u16 {
     1930u16
-}
-
-fn default_veilid_enabled() -> bool {
-    true
 }

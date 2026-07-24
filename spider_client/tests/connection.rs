@@ -6,8 +6,12 @@ use spider_client::{
          message::{DatasetData, Message, RouterMessage}, SelfRelation
     }, ClientResponse, SpiderClientBuilder
 };
-use spider_link::{beacon::start_beacon_listen_handler, link_set::{Epoch, LinkSet, LinkSetMessage, links::Address}, transports::{LinkListener, tcp::{TCP_SCHEME, TcpListener}}, };
-use tokio::sync::{Mutex, mpsc::channel};
+use spider_link::{
+    discovery::{BaseAdvert, beacon::start_beacon_listen_handler},
+    link_set::{Epoch, LinkSet, LinkSetMessage, links::Address},
+    transports::{LinkListener, tcp::{TCP_SCHEME, TcpListener}},
+};
+use tokio::sync::{Mutex, mpsc::channel, watch};
 use tracing::info;
 use tracing_test::traced_test;
 use serial_test::serial;
@@ -26,7 +30,7 @@ async fn connect() {
     listener.listen(host_relation.clone(), listen_tx.clone());
 
     let mut client_builder = SpiderClientBuilder::new_with_self_relation(Some("".into()), client_relation.clone());
-    client_builder.enable_beacon(false);
+    client_builder.enable_discovery(false);
     client_builder.disable_veilid();
     client_builder.enable_transport(TCP_SCHEME.to_owned());
     client_builder.set_fixed_addrs(vec![Address::new(TCP_SCHEME, listen_addr)]);
@@ -75,8 +79,9 @@ async fn connect() {
 async fn beacon_connect() {
     let host_relation = SelfRelation::debug_get(0);
     let client_relation = SelfRelation::debug_get(1);
-
-    start_beacon_listen_handler(1960);
+    let (_template_tx, template_rx) = watch::channel(BaseAdvert::default());
+    
+    start_beacon_listen_handler(template_rx, 1960);
 
     let listen_addr = "127.0.0.1:1960";
     info!("Starting listener");
@@ -85,7 +90,7 @@ async fn beacon_connect() {
     listener.listen(host_relation.clone(), listen_tx.clone());
 
     let mut client_builder = SpiderClientBuilder::new_with_self_relation(Some("".into()), client_relation.clone());
-    client_builder.enable_beacon(true);
+    client_builder.enable_discovery(true);
     client_builder.disable_veilid();
     client_builder.enable_transport(TCP_SCHEME.to_owned());
     client_builder.enable_fixed_addrs(false);
@@ -119,7 +124,7 @@ async fn beacon_connect() {
     let msg = listen_link_set.recv().await.expect("listen link closed");
     let LinkSetMessage::Message(msg, epoch) = msg else {panic!("Incorrect message");};
     assert_eq!(epoch, Epoch::ONE);
-    let Message::Router(msg) = msg else{panic!("Incorrect message type");};
+    let Message::Router(msg) = msg else{panic!("Incorrect message type")};
     let RouterMessage::Event(name, rel, _) = msg else{panic!("Incorrect message type");};
     
     assert_eq!(name, event_name);
@@ -141,7 +146,7 @@ async fn client_round_trip() {
     listener.listen(host_relation.clone(), listen_tx.clone());
 
     let mut client_builder = SpiderClientBuilder::new_with_self_relation(Some("".into()), client_relation.clone());
-    client_builder.enable_beacon(false);
+    client_builder.enable_discovery(false);
     client_builder.disable_veilid();
     client_builder.enable_transport(TCP_SCHEME.to_owned());
     client_builder.set_fixed_addrs(vec![Address::new(TCP_SCHEME, listen_addr)]);

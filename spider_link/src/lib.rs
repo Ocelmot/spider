@@ -37,7 +37,7 @@ mod crypto_suites;
 pub mod id;
 pub mod message;
 use id::SpiderId;
-pub mod beacon;
+pub mod discovery;
 mod keyfile;
 pub use keyfile::Keyfile;
 

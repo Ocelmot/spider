@@ -40,8 +40,8 @@ pub(crate) struct SpiderClientState {
     pub base_addrs: LruCache<Address, ()>,
 
     // Beacon
-    #[serde(default = "bool_true")]
-    pub beacon_enable: bool,
+    #[serde(default = "bool_true", alias = "beacon_enable")]
+    pub discovery_enable: bool,
     #[serde(default = "beacon_default_port")]
     pub beacon_port: u16,
 
@@ -82,7 +82,7 @@ impl SpiderClientState {
             base_addrs: default_lru(),
 
             // Beacon
-            beacon_enable: true,
+            discovery_enable: true,
             beacon_port: beacon_default_port(),
 
             // Veilid
