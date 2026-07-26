@@ -1,1 +1,0 @@
-//! Implementations of discovery for mDNS protocol

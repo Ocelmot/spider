@@ -163,7 +163,7 @@ pub trait Discoverer: Send {
 /// Returns an implementation of Discovery appropriate for the current os
 pub fn get_discovery(beacon_port: u16) -> Box<dyn Discoverer> {
     #[cfg(target_os = "ios")]
-    return Box::new(mdns::mdns);
+    return Box::new(mdns::discover::MdnsDiscoverer::new());
     #[cfg(not(target_os = "ios"))]
     return {
         let mut beacon = Box::new(Beacon::new(Duration::from_secs(5)));

@@ -40,6 +40,8 @@ network-interface = "2.0.0"
 futures = "0.3.31"
 auto-const-array = "0.2.2"
 
+# Discovery
+mdns-sd = "0.20.2"
 
 # crypto schemes
 # cs_0_x25519_chacha20
@@ -52,6 +54,11 @@ hkdf = { "version" = "0.12.4", optional = true }
 # Transport mechanisms
 # transport_iroh
 iroh = { version = "1.0.1", optional = true, features = [] }
+
+
+[target.'cfg(target_os = "ios")'.dependencies]
+# Discovery
+zeroconf-tokio = "0.3.2"
 
 [dev-dependencies]
 tracing-test = "0.2.5"
