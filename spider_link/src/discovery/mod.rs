@@ -3,16 +3,20 @@
 //!
 //! It also contains the counterpart code to respond to those queries.
 
-use std::{future::Future, pin::Pin, time::Duration};
+#[cfg(all(feature = "discovery", not(feature = "transport_tcp")))]
+compile_error!("feature \"discovery\" requires \"transport_tcp\"");
+#[cfg(feature = "discovery")]
+pub mod beacon;
+#[cfg(feature = "discovery")]
+pub mod mdns;
+
+use std::{future::{Future, pending}, pin::Pin};
 
 use link_set::links::Address;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
-use crate::{discovery::beacon::Beacon, error::ErrorKind, LinkResult, SpiderId2048};
-
-pub mod beacon;
-pub mod mdns;
+use crate::{error::ErrorKind, LinkResult, SpiderId2048};
 
 /// Encodes the discovery or loss of contact of BaseAdverts
 #[derive(Debug, Clone)]
@@ -160,14 +164,24 @@ pub trait Discoverer: Send {
     fn next_addr(&mut self) -> Pin<Box<dyn Future<Output = AdvertEvent> + Send + '_>>;
 }
 
+impl Discoverer for () {
+    fn next_addr(&mut self) -> Pin<Box<dyn Future<Output = AdvertEvent> + Send + '_>> {
+        Box::pin(pending())
+    }
+}
+
 /// Returns an implementation of Discovery appropriate for the current os
-pub fn get_discovery(beacon_port: u16) -> Box<dyn Discoverer> {
-    #[cfg(target_os = "ios")]
-    return Box::new(mdns::mdns);
-    #[cfg(not(target_os = "ios"))]
+pub fn get_discovery(_beacon_port: u16) -> Box<dyn Discoverer> {
+    #[cfg(not(feature = "discovery"))]
+    return Box::new(());
+
+    #[cfg(all(feature = "discovery", target_os = "ios"))]
+    return Box::new(mdns::discover::MdnsDiscoverer::new());
+
+    #[cfg(all(feature = "discovery", not(target_os = "ios")))]
     return {
-        let mut beacon = Box::new(Beacon::new(Duration::from_secs(5)));
-        beacon.set_port(beacon_port);
+        let mut beacon = Box::new(beacon::Beacon::new(std::time::Duration::from_secs(5)));
+        beacon.set_port(_beacon_port);
         beacon 
     };
 }

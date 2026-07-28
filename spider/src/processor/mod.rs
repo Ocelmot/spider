@@ -3,6 +3,7 @@ use std::net::SocketAddrV4;
 use std::{path::Path, time::Duration};
 
 use spider_link::discovery::beacon::start_beacon_listen_handler_on;
+use spider_link::discovery::mdns::advertise::start_mdns_advertiser;
 use spider_link::link_set::links::Address;
 use tracing::info;
 use spider_link::message::Message;
@@ -140,6 +141,8 @@ impl Processor {
         }else{
             info!("Beacon listener disabled.");
         }
+        let listen_addr: SocketAddrV4 = config.listen_addr.parse().expect("invalid beacon address");
+        start_mdns_advertiser(state.advert_template_subscribe(), listen_addr.port());
 
         // start peripherals
         let peripherals = PeripheralsProcessor::new(config.clone(), state.clone(), pl.clone());

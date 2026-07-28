@@ -72,7 +72,8 @@ async fn connect() {
     assert_eq!(rel, event_rel);
 }
 
-
+// Wrong discoverer chosen on ios
+#[cfg(all(feature = "discovery", not( target_os = "ios")))]
 #[tokio::test]
 #[traced_test]
 #[serial]
