@@ -1,5 +1,5 @@
 use core::panic;
-use std::{collections::HashSet, path::PathBuf, time::Duration};
+use std::{collections::{hash_map::Entry, HashMap}, path::PathBuf, time::Duration};
 
 #[cfg(feature = "transport_iroh")]
 use spider_link::transports::iroh::{IrohHub, SecretKey};
@@ -192,7 +192,7 @@ impl SpiderClientProcessor {
         let mut connected = false;
         let mut reconnecting = false;
 
-        let mut discovered_addrs = HashSet::new();
+        let mut discovered_addrs:HashMap<Address, u32>  = HashMap::new();
         let mut addr_retry_interval = interval(Duration::from_secs(15));
         loop {
             trace!(
@@ -374,7 +374,9 @@ impl SpiderClientProcessor {
                         AdvertEvent::Found(base_advert) => {
                             if base_advert.id.is_none_or(|id| id == self.state.host_relation.as_ref().unwrap().id) {
                                 let addrs = base_advert.addrs;
-                                discovered_addrs.extend(addrs.clone());
+                                for addr in &addrs{
+                                    *discovered_addrs.entry(addr.clone()).or_insert(0) += 1;
+                                }
                                 // can only add addrs when the link is paired
                                 if let Some(link_set) = &self.link_set{
                                     for addr in addrs{
@@ -385,9 +387,13 @@ impl SpiderClientProcessor {
                         },
                         AdvertEvent::Lost(base_advert) => {
                             if base_advert.id.is_none_or(|id| id == self.state.host_relation.as_ref().unwrap().id) {
-                                let addrs = base_advert.addrs;
-                                for addr in addrs{
-                                    discovered_addrs.remove(&addr);
+                                for addr in base_advert.addrs{
+                                    if let Entry::Occupied(mut e) = discovered_addrs.entry(addr) {
+                                        *e.get_mut() -= 1;
+                                        if *e.get() == 0 {
+                                            e.remove();
+                                        }
+                                    }
                                 }
                             }
                         },
@@ -396,7 +402,7 @@ impl SpiderClientProcessor {
                 _ = addr_retry_interval.tick(), if reconnecting && self.link_set.is_some() && self.state.discovery_enable => {
                     // can only add addrs when the link is paired
                     if let Some(link_set) = &self.link_set{
-                        for addr in &discovered_addrs{
+                        for addr in discovered_addrs.keys(){
                             let _ = link_set.try_addr(addr.clone()).await;
                         }
                     }
