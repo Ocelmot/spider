@@ -14,7 +14,7 @@ transport_iroh = ["spider_link/transport_iroh"]
 
 [dependencies]
 dht_chord = { git = "https://github.com/Ocelmot/chord_dht", rev = "3c3cbb88042d5e2c3c3f27aa96a596b7222433c9" }
-spider_link = { path = "../spider_link", features = ["cs_0_x25519_chacha20"] }
+spider_link = { path = "../spider_link", features = ["cs_0_x25519_chacha20", "discovery"] }
 
 tokio = { version = "1", features = ["full"] }
 tokio-util = {version = "0.7.18", features = ["join-map"]}

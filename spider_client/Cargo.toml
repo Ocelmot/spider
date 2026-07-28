@@ -6,7 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
+default = ["discovery"]
 transport_iroh = ["spider_link/transport_iroh"]
+discovery = ["spider_link/discovery"]
 
 [dependencies]
 spider_link = { path="../spider_link", features = ["cs_0_x25519_chacha20", "transport_tcp"]}
