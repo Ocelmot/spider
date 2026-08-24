@@ -5,6 +5,7 @@ use super::{
     peripherals::PeripheralProcessorMessage,
     router::RouterProcessorMessage,
     ui::UiProcessorMessage,
+    system::SystemProcessorMessage,
 };
 
 #[derive(Debug)]
@@ -14,5 +15,6 @@ pub enum ProcessorMessage {
     UiMessage(UiProcessorMessage),
     DatasetMessage(DatasetProcessorMessage),
     PeripheralMessage(PeripheralProcessorMessage),
+    SystemMessage(SystemProcessorMessage),
     Upkeep,
 }

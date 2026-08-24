@@ -7,10 +7,15 @@ default-run = "spider"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["default_transports"]
+default = ["default_transports", "default_system"]
+
 default_transports = ["transport_tcp", "transport_iroh"]
 transport_tcp = ["spider_link/transport_tcp"]
 transport_iroh = ["spider_link/transport_iroh"]
+
+default_system = ["bluetooth_bluer", "network_nmrs"]
+bluetooth_bluer = ["spider_link/bluetooth", "dep:bluer"]
+network_nmrs = ["dep:nmrs"]
 
 [dependencies]
 dht_chord = { git = "https://github.com/Ocelmot/chord_dht", rev = "3c3cbb88042d5e2c3c3f27aa96a596b7222433c9" }
@@ -19,6 +24,8 @@ spider_link = { path = "../spider_link", features = ["cs_0_x25519_chacha20", "di
 tokio = { version = "1", features = ["full"] }
 tokio-util = {version = "0.7.18", features = ["join-map"]}
 console-subscriber = "0.4.1"
+
+futures = "0.3.31"
 
 network-interface = "2.0.0"
 
@@ -44,3 +51,12 @@ regex = "1.8.1"
 num-bigint = { version = "0.4.3", features = ["serde"] }
 bimap = "0.6.3"
 simple_logger = "5.0.0"
+
+
+# System interface packages
+[target.'cfg(target_os = "linux")'.dependencies]
+# bluetooth_bluer
+bluer = {version = "0.17.4 ", features=["bluetoothd"], optional = true}
+
+# network_nmrs
+nmrs = {version = "3.4.2", optional = true}

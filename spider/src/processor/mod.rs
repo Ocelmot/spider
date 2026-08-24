@@ -39,6 +39,9 @@ use dataset::DatasetProcessor;
 mod group;
 use group::GroupProcessor;
 
+mod system;
+use system::SystemProcessor;
+
 use self::dataset::DatasetProcessorMessage;
 use self::group::GroupProcessorMessage;
 use self::peripherals::PeripheralProcessorMessage;
@@ -47,6 +50,7 @@ use self::router::RouterProcessorMessage;
 pub struct ProcessorBuilder {
     config: Option<SpiderConfig>,
     state: Option<StateData>,
+    hardware_code: Option<String>,
 }
 
 impl ProcessorBuilder {
@@ -54,6 +58,7 @@ impl ProcessorBuilder {
         Self {
             config: None,
             state: None,
+            hardware_code: None,
         }
     }
 
@@ -81,6 +86,10 @@ impl ProcessorBuilder {
         }
     }
 
+    pub fn hardware_code(&mut self, hardware_code: String) {
+        self.hardware_code = Some(hardware_code);
+    }
+
     pub fn is_new(&self) -> bool {
         match &self.state {
             Some(_state) => false,
@@ -93,14 +102,18 @@ impl ProcessorBuilder {
             Some(config) => config,
             None => return Err(SpiderError::new().msg("Failed to read config")),
         };
-        let mut state = match self.state {
+        let state = match self.state {
             Some(state) => state,
             None => return Err(SpiderError::new().msg("Failed to read state")),
+        };
+        let hardware_code = match self.hardware_code {
+            Some(hardware_code) => hardware_code,
+            None => return Err(SpiderError::new().msg("Hardware code not set")),
         };
         state.save_file().await; // normalizes the state file
         state.set_beacon_emit_name(true).await;
         state.set_beacon_emit_id(true).await;
-        let processor = Processor::new(config, state).await?;
+        let processor = Processor::new(config, state, hardware_code).await?;
         Ok(processor.start())
     }
 }
@@ -116,6 +129,7 @@ struct Processor {
     ui: UiProcessor,
     dataset_processor: DatasetProcessor,
     group_processor: GroupProcessor,
+    system: SystemProcessor,
 
     print_msg: bool,
 
@@ -123,10 +137,10 @@ struct Processor {
 }
 
 impl Processor {
-    async fn new(config: SpiderConfig, state: StateData) -> SpiderResult<Self> {
+    async fn new(config: SpiderConfig, state: StateData, hardware_code: String) -> SpiderResult<Self> {
         // create channel
         let (sender, receiver) = channel(500);
-        let pl = ProcessorLink::new(config.clone(), state.clone(), sender);
+        let pl = ProcessorLink::new(config.clone(), state.clone(), sender, hardware_code);
 
         // start router
         let router = RouterProcessor::new(pl.clone()).await?;
@@ -157,6 +171,9 @@ impl Processor {
         // start groups
         let group_processor = GroupProcessor::new(config.clone(), state.clone(), pl.clone());
 
+        // Start system
+        let system = SystemProcessor::new(pl.clone());
+
         // start upkeep interval
         let update_channel = pl.clone();
         // let update_state = state.clone();
@@ -179,6 +196,7 @@ impl Processor {
             ui,
             dataset_processor,
             group_processor,
+            system,
 
             print_msg: false,
 
@@ -299,6 +317,10 @@ impl Processor {
                         self.peripherals.send(msg).await;
                     }
 
+                    ProcessorMessage::SystemMessage(msg) => {
+                        self.system.send(msg).await;
+                    }
+
                     ProcessorMessage::Upkeep => {
                         self.ui.send(UiProcessorMessage::Upkeep).await;
                         self.dataset_processor
@@ -309,6 +331,7 @@ impl Processor {
                             .send(PeripheralProcessorMessage::Upkeep)
                             .await;
                         self.group_processor.send(GroupProcessorMessage::Upkeep).await;
+                        self.system.send(system::SystemProcessorMessage::Upkeep).await;
                         self.state.save_file().await;
                     }
                 }

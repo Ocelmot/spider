@@ -114,8 +114,14 @@ pub enum ErrorKind {
     /// Encountered an error in the router processor
     RouterError,
 
+    /// Encountered an error in one of the system modules
+    SystemError,
+
     /// Authentication failure
     Authentication,
+
+    /// Encountered an uninitialized
+    Uninitialized,
     /// Other problems
     Misc,
 }
@@ -125,7 +131,7 @@ pub enum ErrorKind {
 pub struct SpiderError {
     kind: ErrorKind,
     msg: Option<String>,
-    source: Option<Box<(dyn Error + Send + Sync + 'static)>>,
+    source: Option<Box<dyn Error + Send + Sync + 'static>>,
 }
 
 impl SpiderError {
@@ -170,6 +176,21 @@ impl SpiderError {
                 source: Some(Box::new(self)),
             }
         }
+    }
+
+    /// get the errors recursively
+    pub fn get_trace(&self) -> String {
+        let mut ret = String::new();
+        ret.push_str(&format!("Error: {}\n", self));
+        let mut next = self.source();
+        loop {
+            if let Some(next_err) = next{
+                ret.push_str(&format!("From: {}\n", next_err));
+                next = next_err.source();
+            }else{break;}
+            
+        }
+        ret
     }
 }
 

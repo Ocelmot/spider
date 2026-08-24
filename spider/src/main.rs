@@ -60,6 +60,10 @@ use state_data::StateData;
 mod processor;
 use crate::processor::ProcessorBuilder;
 
+mod system;
+
+mod misc;
+
 mod error;
 
 /// Command line arguments: <filename>
@@ -111,6 +115,7 @@ async fn main() -> Result<(), io::Error> {
     let mut pb = ProcessorBuilder::new();
     pb.config(config.clone());
     pb.state_file(Path::new(&config.state_data_path), config.static_addrs.clone());
+    pb.hardware_code(std::fs::read_to_string(&config.hardware_code_path())?);
 
     // if state is empty, enter new mode to create an id and establish first UI connection/owner
     // (could also migrate id from other spider)

@@ -9,6 +9,7 @@ edition = "2021"
 default = ["discovery"]
 transport_iroh = ["spider_link/transport_iroh"]
 discovery = ["spider_link/discovery"]
+bluetooth = ["spider_link/bluetooth"]
 
 [dependencies]
 spider_link = { path="../spider_link", features = ["cs_0_x25519_chacha20", "transport_tcp"]}

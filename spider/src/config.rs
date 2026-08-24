@@ -52,6 +52,9 @@ pub struct SpiderConfig {
 
     #[serde(default)]
     group_path: Option<String>,
+
+    #[serde(default = "default_hardware_code_path")]
+    hardware_code_path: String,
 }
 
 impl SpiderConfig {
@@ -101,6 +104,10 @@ impl SpiderConfig {
     pub fn beacon_port(&self) -> u16 {
         self.beacon_port
     }
+
+    pub fn hardware_code_path(&self) -> &String {
+        &self.hardware_code_path
+    }
 }
 
 // Defaults
@@ -130,4 +137,8 @@ fn default_state_data_path() -> String {
 
 fn default_beacon_port() -> u16 {
     1930u16
+}
+
+fn default_hardware_code_path() -> String {
+    "hardware_code".into()
 }

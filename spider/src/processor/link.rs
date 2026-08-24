@@ -17,6 +17,7 @@ pub struct ProcessorLink {
     config: SpiderConfig,
     state: StateData,
     sender: Sender<ProcessorMessage>,
+    hardware_code: String,
 }
 
 impl ProcessorLink {
@@ -24,11 +25,13 @@ impl ProcessorLink {
         config: SpiderConfig,
         state: StateData,
         sender: Sender<ProcessorMessage>,
+        hardware_code: String,
     ) -> Self {
         Self {
             config,
             state,
             sender,
+            hardware_code,
         }
     }
 
@@ -84,5 +87,9 @@ impl ProcessorLink {
     pub(crate) async fn send_dataset(&self, msg: DatasetProcessorMessage) -> SpiderResult {
         let msg = ProcessorMessage::DatasetMessage(msg);
         self.sender.send(msg).await.wrap()
+    }
+
+    pub(crate) fn hardware_code(&self) -> &str{
+        &self.hardware_code
     }
 }

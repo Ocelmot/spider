@@ -54,3 +54,7 @@ pub use relation::{RelSig, Relation, Role, SelfRelation};
 pub mod transports;
 
 mod utils;
+pub use utils::opt_await;
+
+#[cfg(feature = "bluetooth")]
+pub mod bluetooth;

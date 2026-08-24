@@ -8,3 +8,5 @@ groups/
 *.base64
 .veilid
 .DS_Store
+hardware_code
+*.patch
