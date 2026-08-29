@@ -61,7 +61,7 @@ impl LinuxNetwork {
             last_seen: None,
             _monitor_handle: monitor_handle,
             device_changed,
-            attached: Arc::new(AtomicBool::new(false)),
+            attached: Arc::new(AtomicBool::new(true)),
         })
     }
 }
